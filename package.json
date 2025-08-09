@@ -1,0 +1,25 @@
+{
+  "name": "@stonyx/rest-server",
+  "keywords": [
+    "stonyx-module"
+  ],
+  "version": "0.0.1",
+  "description": "Rest Server Module for Stonyx Framework",
+  "main": "src/main.js",
+  "type": "module",
+  "exports": {
+    ".": "./src/main.js"
+  },
+  "scripts": {
+    "test": "qunit"
+  },
+  "author": "Stone Costa",
+  "license": "Apache-2.0",
+  "contributors": [
+    "Stone Costa <stone.costa@synamicd.com>"
+  ],
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
+  }
+}
