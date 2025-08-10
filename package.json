@@ -1,6 +1,7 @@
 {
   "name": "@stonyx/rest-server",
   "keywords": [
+    "stonyx-async",
     "stonyx-module"
   ],
   "version": "0.0.1",
