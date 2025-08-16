@@ -34,12 +34,12 @@ module('[Integration] Rest Server', function(hooks) {
       assert.equal(data.data, 'foo');
     });
 
-    test('Returns 200 with no data when no response is returned', async function(assert) {
+    test('Returns 200 with default OK body when no response is returned', async function(assert) {
       const response = await fetch(`${endpoint}/public/success`);
-      const data = await response.json();
+      const data = await response.text();
 
       assert.equal(response.status, 200);
-      assert.equal(data.data, 'foo');
+      assert.equal(data, 'OK');
     });
 
     test('Correctly handles url params', async function(assert) {
