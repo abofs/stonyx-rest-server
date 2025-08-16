@@ -8,6 +8,10 @@ export default class PublicRequest extends Request {
         return { data: 'foo' };
       },
 
+      '/success': (_request, _state) => {
+        // no return
+      },
+
       '/url-params/:x/:y/:z': ({ params }, _state) => {
         return params;
       },

@@ -34,6 +34,14 @@ module('[Integration] Rest Server', function(hooks) {
       assert.equal(data.data, 'foo');
     });
 
+    test('Returns 200 with no data when no response is returned', async function(assert) {
+      const response = await fetch(`${endpoint}/public/success`);
+      const data = await response.json();
+
+      assert.equal(response.status, 200);
+      assert.equal(data.data, 'foo');
+    });
+
     test('Correctly handles url params', async function(assert) {
       const response = await fetch(`${endpoint}/public/url-params/foo/bar/baz`);
       const data = await response.json();
