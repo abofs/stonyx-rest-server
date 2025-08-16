@@ -12,7 +12,7 @@
     ".": "./src/main.js"
   },
   "scripts": {
-    "test": "qunit"
+    "test": "qunit --require ./stonyx-bootstrap.cjs"
   },
   "author": "Stone Costa",
   "license": "Apache-2.0",
@@ -21,6 +21,13 @@
   ],
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "stonyx": "file:../stonyx"
+  },
+  "devDependencies": {
+    "@stonyx/utils": "file:../stonyx-utils",
+    "node-fetch": "^3.3.2",
+    "qunit": "^2.24.1",
+    "sinon": "^21.0.0"
   }
 }

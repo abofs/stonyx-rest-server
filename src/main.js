@@ -1,8 +1,26 @@
+/*
+ * Copyright 2025 Stone Costa
+ *
+ * Licensed under the Apache License, Version 2.0 (the 'License');
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 import cors from 'cors';
 import express from 'express';
 import config from 'stonyx/config';
 import log from 'stonyx/log';
 import { forEachFileImport } from '@stonyx/utils/file';
+
+export { default as Request } from './request.js';
 
 export default class RestServer {
   constructor() {
@@ -10,7 +28,12 @@ export default class RestServer {
     RestServer.instance = this;
 
     this.api = new express();
-    this.init();
+  }
+
+  static close() {
+    if (!RestServer.instance) throw new Error('RestServer has not been initialized yet');
+
+    RestServer.instance.server.close();
   }
   
   async init() {
@@ -19,7 +42,7 @@ export default class RestServer {
     const { port } = config.restServer;
 
     // start REST server
-    this.api.listen(port);
+    this.server = this.api.listen(port);
     log.title(`API Server is listening on port ${port}`);
   }
 
@@ -33,22 +56,22 @@ export default class RestServer {
 
     try {
       await forEachFileImport(dir, async (routeClass, { name }) => {
-        const route = `/${name}`;
+        const route = name === 'index' ? '/' : `/${name}`;
         const subRoute = new routeClass();
-        const { handler, auth } = subRoute;
+        const { expressInstance, authorization } = subRoute;
 
-        handler.use(express.json());
-
-        const routeCalls = [ handler.bind(subRoute) ];
+        expressInstance.use(express.json());
+        
+        const routeCalls = [ expressInstance ];
 
         // Assign auth callback if it exists in route handler
-        if (auth) routeCalls.unshift(auth.bind(subRoute));
+        if (authorization) routeCalls.unshift(authorization.bind(subRoute));
         
         // Set CORS headers        
-        handler.use(cors({ origin }));
+        expressInstance.use(cors({ origin }));
         
         subRoute.registerCalls();
-        handler.mountpath = route;
+        expressInstance.mountpath = route;
         
         // Mount handler to main api instance
         this.api.use(route, ...routeCalls);
