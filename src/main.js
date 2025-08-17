@@ -52,33 +52,39 @@ export default class RestServer {
    * of express, and mounts them accordingly.
    */
   async setupRouter() {
-    const { dir, origin, camelCaseRoutes } = config.restServer;
+    const { dir, camelCaseRoutes } = config.restServer;
 
     try {
       await forEachFileImport(dir, async (routeClass, { name }) => {
-        const route = name === 'index' ? '/' : `/${name}`;
         const subRoute = new routeClass();
-        const { expressInstance, authorization } = subRoute;
 
-        expressInstance.use(express.json());
-        
-        const routeCalls = [ expressInstance ];
-
-        // Assign auth callback if it exists in route handler
-        if (authorization) routeCalls.unshift(authorization.bind(subRoute));
-        
-        // Set CORS headers        
-        expressInstance.use(cors({ origin }));
-        
-        subRoute.registerCalls();
-        expressInstance.mountpath = route;
-        
-        // Mount handler to main api instance
-        this.api.use(route, ...routeCalls);
+        this.mountRoute(name, subRoute);
       }, { rawName: !camelCaseRoutes });
     } catch (error) {
       if (config.debug) console.log(error);
       throw log.error(`Unable to dynamically configure routes from files in ${dir}`);
     }
+  }
+
+  async mountRoute(name, classInstance) {
+    const { origin } = config.restServer;
+    const route = name === 'index' ? '/' : `/${name}`;
+    const { expressInstance, authorization } = classInstance;
+
+    expressInstance.use(express.json());
+    
+    const routeCalls = [ expressInstance ];
+
+    // Assign auth callback if it exists
+    if (authorization) routeCalls.unshift(authorization.bind(classInstance));
+    
+    // Set CORS headers        
+    expressInstance.use(cors({ origin }));
+    
+    classInstance.registerCalls();
+    expressInstance.mountpath = route;
+    
+    // Mount handler to main api instance
+    this.api.use(route, ...routeCalls);
   }
 }
