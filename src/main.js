@@ -75,7 +75,7 @@ export default class RestServer {
         
         // Mount handler to main api instance
         this.api.use(route, ...routeCalls);
-      }, { rawName: camelCaseRoutes !== 'true' });
+      }, { rawName: !camelCaseRoutes });
     } catch (error) {
       if (config.debug) console.log(error);
       throw log.error(`Unable to dynamically configure routes from files in ${dir}`);
