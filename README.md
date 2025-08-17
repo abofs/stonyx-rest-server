@@ -46,6 +46,8 @@ is installed, it will be auto-initialized.
 ## API Endpoints
 API endpoints are defined in separate files within the `dir` directory. Each file should export a class that extends the `RestServer` class.
 
+For more samples, see this project's `test/sample-requests` directory.
+
 Example:
 ```javascript
 // requests/users.js - Listens on /users
