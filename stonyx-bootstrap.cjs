@@ -5,7 +5,7 @@ const { default:Stonyx } = require('stonyx');
 const { default:config } = require('./config/environment.js');
 
 // Override dir for tests
-config.dir = './test/sample-requests';
+config.dir = './test/sample/requests';
 
 new Stonyx(config, __dirname);
 
