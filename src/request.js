@@ -2,6 +2,8 @@ import express from 'express';
 import config from 'stonyx/config';
 import { makeArray } from '@stonyx/utils/object';
 
+const METHODS = new Set(['get', 'post', 'put', 'delete', 'patch']);
+
 export default class Request {
   static stateProp = '__stonyxState';
 
@@ -39,12 +41,17 @@ export default class Request {
     const { getState } = Request;
     
     for (const [method, handlers] of Object.entries(this.handlers)) {
-      for (const [route, handler] of Object.entries(handlers)) {
-        const callStack = makeArray(handler);
-        let response;
+      if (!METHODS.has(method)) {
+        console.warn(`Method "${method}" is not a valid HTTP method. Skipping...`);
+        continue;
+      }
 
+      for (const [route, handler] of Object.entries(handlers)) {
         expressInstance[method](route, async (req, res) => {
+          const callStack = makeArray(handler);
           const mainCall = callStack.pop();
+          const { sendStatusResponse } = Request;
+          let response;
 
           // Run middleware
           while(callStack.length) {
@@ -53,9 +60,9 @@ export default class Request {
           }
 
           if (response === undefined) response = await mainCall(req, getState(req));
-          if (Number.isInteger(response)) return res.sendStatus(response);
+          if (Number.isInteger(response)) return sendStatusResponse(res, response);
           if (response === undefined) return res.sendStatus(200);
-          if (typeof response !== 'object') return res.sendStatus(500);
+          if (typeof response !== 'object') return sendStatusResponse(res, 500);
 
           res.send(response);
         });

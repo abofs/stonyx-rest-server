@@ -46,27 +46,20 @@ export default class RestServer {
     log.title(`API Server is listening on port ${port}`);
   }
 
-  /**
-   * Iterates through the top level of api-server
-   * directory, dynamically imports all sub instances
-   * of express, and mounts them accordingly.
-   */
   async setupRouter() {
     const { dir, camelCaseRoutes } = config.restServer;
 
     try {
-      await forEachFileImport(dir, async (routeClass, { name }) => {
-        const subRoute = new routeClass();
-
-        this.mountRoute(name, subRoute);
-      }, { rawName: !camelCaseRoutes });
+      await forEachFileImport(dir, this.mountRoute.bind(this), { rawName: !camelCaseRoutes });
     } catch (error) {
       if (config.debug) console.log(error);
       throw log.error(`Unable to dynamically configure routes from files in ${dir}`);
     }
   }
 
-  async mountRoute(name, classInstance) {
+  async mountRoute(routeClass, { name, options }) {
+    const classInstance = new routeClass(options);
+
     const { origin } = config.restServer;
     const route = name === 'index' ? '/' : `/${name}`;
     const { expressInstance, authorization } = classInstance;

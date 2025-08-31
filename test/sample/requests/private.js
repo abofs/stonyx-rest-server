@@ -10,6 +10,10 @@ export default class PrivateRequest extends Request {
       '/failure': (_request, _state) => {
         return { data: 'foo' };
       }
+    },
+
+    someInvalidMethod: (_request, _state) => {
+      return { data: 'foo' };
     }
   }
 

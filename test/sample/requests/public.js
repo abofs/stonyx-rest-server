@@ -2,6 +2,7 @@ import { Request } from '@stonyx/rest-server';
 
 export default class PublicRequest extends Request {
   testProp = 'stonyx';
+  
   handlers = {
     get: {
       '/': (_request, _state) => {

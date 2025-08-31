@@ -50,6 +50,14 @@ module('[Integration] Rest Server', function(hooks) {
       assert.deepEqual(data, { x: 'foo', y: 'bar', z: 'baz' });
     });
 
+    test('Correctly handles different params on same call', async function(assert) {
+      const response = await fetch(`${endpoint}/public/url-params/1/2/3`);
+      const data = await response.json();
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(data, { x: '1', y: '2', z: '3' });
+    });
+
     test('Correctly executes successful validation middleware', async function(assert) {
       const response = await fetch(`${endpoint}/public/foo`);
       const data = await response.json();
