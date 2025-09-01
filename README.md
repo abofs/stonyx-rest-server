@@ -2,6 +2,17 @@
 
 REST server module for the [Stonyx framework](https://github.com/abofs/stonyx), providing dynamic route registration and built-in request handling with optional authentication hooks.
 
+## Highlights
+
+* **Zero configuration for routes:** Simply drop your request class files into the configured `requests` directory and the RestServer automatically mounts them.
+* **Automatic path generation:** Filenames become route paths (with optional camelCase conversion).
+* **Built-in JSON & CORS handling:** No need to manually configure Express middleware.
+* **Authorization hooks per request:** Add authentication logic per class with minimal boilerplate.
+* **Singleton server:** Only one RestServer instance runs, preventing accidental multiple listeners.
+* **Framework integration:** Works seamlessly as part of the Stonyx framework—auto-initialized with the rest of your modules.
+
+---
+
 ## Running the test suite
 
 ```
