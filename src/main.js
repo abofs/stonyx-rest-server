@@ -50,7 +50,7 @@ export default class RestServer {
     const { dir, camelCaseRoutes } = config.restServer;
 
     try {
-      await forEachFileImport(dir, this.mountRoute.bind(this), { rawName: !camelCaseRoutes });
+      await forEachFileImport(dir, this.mountRoute.bind(this), { rawName: !camelCaseRoutes, ignoreAccessFailure: true });
     } catch (error) {
       if (config.debug) console.log(error);
       throw log.error(`Unable to dynamically configure routes from files in ${dir}`);
