@@ -1,7 +1,3 @@
-Perfect! Here’s the updated README.md with a **mini “example project structure”** section added, showing how to organize `public.js` and `private.js` request classes within the `requests` directory:
-
----
-
 # @stonyx/rest-server
 
 REST server module for the [Stonyx framework](https://github.com/abofs/stonyx), providing dynamic route registration and built-in request handling with optional authentication hooks.
