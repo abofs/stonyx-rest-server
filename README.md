@@ -11,14 +11,6 @@ REST server module for the [Stonyx framework](https://github.com/abofs/stonyx), 
 * **Singleton server:** Only one RestServer instance runs, preventing accidental multiple listeners.
 * **Framework integration:** Works seamlessly as part of the Stonyx framework—auto-initialized with the rest of your modules.
 
----
-
-## Running the test suite
-
-```
-npm test
-```
-
 ## RestServer
 
 The `RestServer` class wraps an Express.js instance to provide:
@@ -33,6 +25,12 @@ The `RestServer` class wraps an Express.js instance to provide:
 This module is part of the **Stonyx framework**. To use it, first configure the `restServer` key in your `environment.js` file:
 
 ```js
+const {
+  REST_CORS_ORIGIN,
+  REST_PORT,
+  REST_REQUEST_PATH
+} = process;
+
 export default {
     restServer: {
        origin: REST_CORS_ORIGIN ?? '*',
