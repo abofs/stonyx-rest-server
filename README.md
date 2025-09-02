@@ -145,7 +145,7 @@ Assuming you have `public.js` and `private.js` routes mounted, you can test them
 
 ```bash
 # Public route - should return 200 OK with JSON
-curl http://localhost:2666/public/success
+curl http://localhost:2666/public
 
 # Public route with no return - defaults to 200 OK
 curl http://localhost:2666/public/success
