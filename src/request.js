@@ -61,6 +61,16 @@ export default class Request {
 
           if (response === undefined) response = await mainCall(req, getState(req));
           if (Number.isInteger(response)) return sendStatusResponse(res, response);
+          
+          // Handle pipe if set via call state object
+          const { pipe } = getState(req);
+          if (pipe) {
+            const { headers, source } = pipe;
+
+            if (headers) for (const [key, value] of Object.entries(headers)) res.set(key, value);
+            return source.pipe(res);
+          }
+
           if (response === undefined) return res.sendStatus(200);
           if (typeof response !== 'object') return sendStatusResponse(res, 500);
 

@@ -47,32 +47,41 @@ export default class RestServer {
   }
 
   async setupRouter() {
-    const { dir, camelCaseRoutes } = config.restServer;
+    const { camelCaseRoutes, dir, enableHealthCheck } = config.restServer;
 
     try {
       await forEachFileImport(dir, this.mountRoute.bind(this), { rawName: !camelCaseRoutes, ignoreAccessFailure: true });
+
+      if (enableHealthCheck) this.api.get('/health', (_req, res) => res.sendStatus(200));
     } catch (error) {
       if (config.debug) console.log(error);
       throw log.error(`Unable to dynamically configure routes from files in ${dir}`);
     }
   }
 
+  configureCors(expressInstance) {
+    const { origin, methods } = config.restServer; 
+    const corsOptions = cors({
+      origin,
+      methods: methods.split(','),
+      //allowedHeaders: ['Content-Type', 'Authorization'],
+    });
+
+    expressInstance.use(corsOptions);
+  }
+
   async mountRoute(routeClass, { name, options }) {
     const classInstance = new routeClass(options);
-
-    const { origin } = config.restServer;
     const route = name === 'index' ? '/' : `/${name}`;
     const { expressInstance, authorization } = classInstance;
 
     expressInstance.use(express.json());
+    this.configureCors(expressInstance);
     
     const routeCalls = [ expressInstance ];
 
     // Assign auth callback if it exists
     if (authorization) routeCalls.unshift(authorization.bind(classInstance));
-    
-    // Set CORS headers        
-    expressInstance.use(cors({ origin }));
     
     classInstance.registerCalls();
     expressInstance.mountpath = route;

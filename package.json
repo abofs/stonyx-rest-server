@@ -25,8 +25,7 @@
     "stonyx": "file:../stonyx"
   },
   "devDependencies": {
-    "@stonyx/utils": "file:../stonyx-utils",
-    "node-fetch": "^3.3.2",
+    "@stonyx/utils": "^0.2.0",
     "qunit": "^2.24.1",
     "sinon": "^21.0.0"
   }

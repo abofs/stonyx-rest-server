@@ -1,6 +1,5 @@
 import QUnit from "qunit";
 import RestServer from "@stonyx/rest-server";
-import fetch from "node-fetch";
 import config from "stonyx/config";
 import { setupIntegrationTests } from "stonyx/test-helpers";
 
@@ -102,6 +101,14 @@ module('[Integration] Rest Server', function(hooks) {
       const response = await fetch(`${endpoint}/private/failure`);
 
       assert.equal(response.status, 505);
+    });
+  });
+
+  module('/health', function(hooks) {
+    test('Health check endpoint is configured automatically', async function(assert) {
+      const response = await fetch(`${endpoint}/health`);
+
+      assert.equal(response.status, 200);
     });
   });
 });
