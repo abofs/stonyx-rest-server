@@ -48,6 +48,7 @@ export default class RestServer {
 
   async setupRouter() {
     const { camelCaseRoutes, dir, enableHealthCheck } = config.restServer;
+    this.setupGlobalMiddleware();
 
     try {
       await forEachFileImport(dir, this.mountRoute.bind(this), { rawName: !camelCaseRoutes, ignoreAccessFailure: true });
@@ -59,34 +60,30 @@ export default class RestServer {
     }
   }
 
-  configureCors(expressInstance) {
-    const { origin, methods } = config.restServer; 
-    const corsOptions = cors({
-      origin,
-      methods: methods.split(','),
-      //allowedHeaders: ['Content-Type', 'Authorization'],
-    });
+  async setupGlobalMiddleware() {
+    const { origin, methods } = config.restServer;
 
-    expressInstance.use(corsOptions);
+    this.api.use([
+      cors({ origin, methods }),
+      express.json()
+    ]);
   }
 
   async mountRoute(routeClass, { name, options }) {
+    const { api } = this;
     const classInstance = new routeClass(options);
     const route = name === 'index' ? '/' : `/${name}`;
     const { expressInstance, authorization } = classInstance;
-
-    expressInstance.use(express.json());
-    this.configureCors(expressInstance);
     
     const routeCalls = [ expressInstance ];
 
     // Assign auth callback if it exists
     if (authorization) routeCalls.unshift(authorization.bind(classInstance));
-    
+
     classInstance.registerCalls();
     expressInstance.mountpath = route;
     
     // Mount handler to main api instance
-    this.api.use(route, ...routeCalls);
+    api.use(route, ...routeCalls);
   }
 }

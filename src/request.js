@@ -23,7 +23,10 @@ export default class Request {
   }
 
   constructor() {
-    this.expressInstance = express();
+    const api = express();
+    api.disable('x-powered-by');
+    
+    this.expressInstance = api;
   }
 
   // auth hook wrapper
