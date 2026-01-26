@@ -1,0 +1,32 @@
+{
+  "name": "@stonyx/rest-server",
+  "keywords": [
+    "stonyx-async",
+    "stonyx-module"
+  ],
+  "version": "0.0.1",
+  "description": "Rest Server Module for Stonyx Framework",
+  "main": "src/main.js",
+  "type": "module",
+  "exports": {
+    ".": "./src/main.js"
+  },
+  "scripts": {
+    "test": "qunit --require ./stonyx-bootstrap.cjs"
+  },
+  "author": "Stone Costa",
+  "license": "Apache-2.0",
+  "contributors": [
+    "Stone Costa <stone.costa@synamicd.com>"
+  ],
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "stonyx": "^0.2.2"
+  },
+  "devDependencies": {
+    "@stonyx/utils": "^0.2.2",
+    "qunit": "^2.24.1",
+    "sinon": "^21.0.0"
+  }
+}
