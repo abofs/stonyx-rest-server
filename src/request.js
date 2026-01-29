@@ -51,7 +51,7 @@ export default class Request {
 
       for (const [route, handler] of Object.entries(handlers)) {
         expressInstance[method](route, async (req, res) => {
-          const callStack = makeArray(handler);
+          const callStack = [...makeArray(handler)];
           const mainCall = callStack.pop();
           const { sendStatusResponse } = Request;
           let response;
