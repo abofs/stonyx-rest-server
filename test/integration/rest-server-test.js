@@ -65,6 +65,20 @@ module('[Integration] Rest Server', function(hooks) {
       assert.deepEqual(data, { data: { newProp: 'bar' } });
     });
 
+    test('Middleware routes work on repeated calls', async function(assert) {
+      const response1 = await fetch(`${endpoint}/public/foo`);
+      const data1 = await response1.json();
+
+      assert.equal(response1.status, 200, 'First call succeeds');
+      assert.deepEqual(data1, { data: { newProp: 'bar' } });
+
+      const response2 = await fetch(`${endpoint}/public/foo`);
+      const data2 = await response2.json();
+
+      assert.equal(response2.status, 200, 'Second call succeeds');
+      assert.deepEqual(data2, { data: { newProp: 'bar' } });
+    });
+
     test('Correctly executes failed validation middleware', async function(assert) {
       const response = await fetch(`${endpoint}/public/fail`);
 
