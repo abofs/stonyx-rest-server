@@ -5,3 +5,6 @@
 .vscode/*
 *.vsix%
 *DS_Store*
+
+# npm auth (never commit tokens)
+.npmrc
