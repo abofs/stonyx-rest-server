@@ -6,6 +6,10 @@
   ],
   "version": "0.2.0",
   "description": "Rest Server Module for Stonyx Framework",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/abofs/stonyx-rest-server"
+  },
   "main": "src/main.js",
   "type": "module",
   "exports": {
