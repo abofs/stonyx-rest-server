@@ -16,7 +16,7 @@
     ".": "./src/main.js"
   },
   "scripts": {
-    "test": "qunit --require ./stonyx-bootstrap.cjs",
+    "test": "stonyx test",
     "prepublishOnly": "npm test"
   },
   "author": "Stone Costa",
@@ -31,10 +31,10 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^5.1.0",
-    "stonyx": "^0.2.2"
+    "stonyx": "file:../stonyx"
   },
   "devDependencies": {
-    "@stonyx/utils": "^0.2.2",
+    "@stonyx/utils": "file:../stonyx-utils",
     "qunit": "^2.24.1",
     "sinon": "^21.0.0"
   }
