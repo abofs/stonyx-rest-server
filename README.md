@@ -69,12 +69,13 @@ Configuration is read from `stonyx/config` under `restServer`:
 
 |       Option      |         Type        | Default     | Description                                                |
 | :---------------: | :-----------------: | :---------- | :--------------------------------------------------------- |
-|       `dir`       |      **String**     | `undefined` | Directory containing request classes to mount as routes    |
+|       `dir`       |      **String**     | `'./requests'` | Directory containing request classes to mount as routes    |
 | `camelCaseRoutes` |     **Boolean**     | `true`      | Convert filenames to camelCase when generating route paths |
-|       `port`      |      **Number**     | `3000`      | Port to listen on                                          |
+|       `port`      |      **Number**     | `2666`      | Port to listen on                                          |
 |      `origin`     | **String \| Array** | `'*'`       | CORS origin(s) allowed                                     |
+|    `methods`      | **String**          | `'GET,POST,PATCH,PUT,DELETE'` | CORS allowed methods                              |
+| `enableHealthCheck` |   **Boolean**     | `true`      | Register `GET /health` endpoint (disable via `REST_HEALTH_CHECK_DISABLE=true`) |
 |    `statusMap`    |      **Object**     | `{}`        | Optional mapping of HTTP status codes to custom messages   |
-|      `debug`      |     **Boolean**     | `false`     | Enable debug logging during route setup                    |
 
 ## Request Class
 
@@ -131,10 +132,6 @@ project-root/
 * `private.js` — contains routes with authentication via the `auth` hook
 
 The `RestServer` will automatically mount these routes using the filenames as paths (`/public` and `/private` by default, or camelCased if configured).
-
-Perfect! Here’s a self-contained **“Example Requests”** section with sample `curl` calls:
-
----
 
 ### Example Requests
 
