@@ -4,7 +4,7 @@
     "stonyx-async",
     "stonyx-module"
   ],
-  "version": "0.2.1-beta.2",
+  "version": "0.2.1-beta.3",
   "description": "Rest Server Module for Stonyx Framework",
   "repository": {
     "type": "git",
@@ -34,7 +34,7 @@
     "stonyx": "0.2.3-beta.1"
   },
   "devDependencies": {
-    "@stonyx/utils": "0.2.3-beta.2",
+    "@stonyx/utils": "0.2.3-beta.3",
     "qunit": "^2.24.1",
     "sinon": "^21.0.0"
   }
