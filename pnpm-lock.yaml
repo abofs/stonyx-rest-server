@@ -15,8 +15,8 @@ importers:
         specifier: ^5.1.0
         version: 5.2.1
       stonyx:
-        specifier: 0.2.3-beta.2
-        version: 0.2.3-beta.2
+        specifier: 0.2.3-beta.3
+        version: 0.2.3-beta.3
     devDependencies:
       '@stonyx/utils':
         specifier: 0.2.3-beta.3
@@ -338,8 +338,8 @@ packages:
     resolution: {integrity: sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==}
     engines: {node: '>= 0.8'}
 
-  stonyx@0.2.3-beta.2:
-    resolution: {integrity: sha512-w2XmOMmqxbPqs6/ph+GlxHYMG3+BRo/FAnXA8EPBDy+ooh6i8SwjdjUcoqREMeV6zYUCrm63ztUjQ2TCKnW2vw==}
+  stonyx@0.2.3-beta.3:
+    resolution: {integrity: sha512-9QkjkPtD8I6MH40BIZm5FgKQ0cIADV9qpkNcmwgPYWhUBzgWBWkQmdx1hHy5beefm9+1HLkC+RDNiMj4kKf0Cw==}
     hasBin: true
 
   supports-color@7.2.0:
@@ -733,7 +733,7 @@ snapshots:
 
   statuses@2.0.2: {}
 
-  stonyx@0.2.3-beta.2:
+  stonyx@0.2.3-beta.3:
     dependencies:
       node-chronicle: 0.2.0
 
