@@ -15,12 +15,12 @@ importers:
         specifier: ^5.1.0
         version: 5.2.1
       stonyx:
-        specifier: file:../stonyx
-        version: file:../stonyx
+        specifier: 0.2.3-beta.0
+        version: 0.2.3-beta.0
     devDependencies:
       '@stonyx/utils':
-        specifier: file:../stonyx-utils
-        version: file:../stonyx-utils
+        specifier: 0.2.3-beta.2
+        version: 0.2.3-beta.2
       qunit:
         specifier: ^2.24.1
         version: 2.25.0
@@ -39,8 +39,8 @@ packages:
   '@sinonjs/samsam@8.0.3':
     resolution: {integrity: sha512-hw6HbX+GyVZzmaYNh82Ecj1vdGZrqVIn/keDTg63IgAwiQPO+xCz99uG6Woqgb4tM0mUiFENKZ4cqd7IX94AXQ==}
 
-  '@stonyx/utils@file:../stonyx-utils':
-    resolution: {directory: ../stonyx-utils, type: directory}
+  '@stonyx/utils@0.2.3-beta.2':
+    resolution: {integrity: sha512-GsKNqYPtf2SpvcDTvWB+TBee7uzDeLWXjXDHwSQR/Y6wTMbjH6YtU4gaITB19P74vGe/4Xwpuf+3UTeM0/3PjQ==}
 
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
@@ -338,8 +338,8 @@ packages:
     resolution: {integrity: sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==}
     engines: {node: '>= 0.8'}
 
-  stonyx@file:../stonyx:
-    resolution: {directory: ../stonyx, type: directory}
+  stonyx@0.2.3-beta.0:
+    resolution: {integrity: sha512-1S5BpvoVryCX75LqwuiiRv3Gdpe+uAtNHyWVnyu3VjaHi19fLCtQDMUKVxVOMcQTslwd1zkxMNKDc4SHKFRHIw==}
 
   supports-color@7.2.0:
     resolution: {integrity: sha512-qpCAvRl9stuOHveKsn7HncJRvv501qIacKzQlO/+Lwxc9+0q2wLyv4Dfvt80/DPn2pqOBsJdDiogXGR9+OvwRw==}
@@ -397,7 +397,7 @@ snapshots:
       '@sinonjs/commons': 3.0.1
       type-detect: 4.1.0
 
-  '@stonyx/utils@file:../stonyx-utils': {}
+  '@stonyx/utils@0.2.3-beta.2': {}
 
   accepts@2.0.0:
     dependencies:
@@ -732,7 +732,7 @@ snapshots:
 
   statuses@2.0.2: {}
 
-  stonyx@file:../stonyx:
+  stonyx@0.2.3-beta.0:
     dependencies:
       node-chronicle: 0.2.0
 
