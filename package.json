@@ -31,10 +31,10 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^5.1.0",
-    "stonyx": "file:../stonyx"
+    "stonyx": "0.2.3-beta.0"
   },
   "devDependencies": {
-    "@stonyx/utils": "file:../stonyx-utils",
+    "@stonyx/utils": "0.2.3-beta.2",
     "qunit": "^2.24.1",
     "sinon": "^21.0.0"
   }
