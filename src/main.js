@@ -61,7 +61,9 @@ export default class RestServer {
   }
 
   async setupGlobalMiddleware() {
-    const { origin, methods } = config.restServer;
+    const { origin, methods, trustProxy } = config.restServer;
+
+    if (trustProxy) this.api.set('trust proxy', true);
 
     this.api.use([
       cors({ origin, methods }),
