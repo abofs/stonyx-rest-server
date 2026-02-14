@@ -75,7 +75,20 @@ Configuration is read from `stonyx/config` under `restServer`:
 |      `origin`     | **String \| Array** | `'*'`       | CORS origin(s) allowed                                     |
 |    `methods`      | **String**          | `'GET,POST,PATCH,PUT,DELETE'` | CORS allowed methods                              |
 | `enableHealthCheck` |   **Boolean**     | `true`      | Register `GET /health` endpoint (disable via `REST_HEALTH_CHECK_DISABLE=true`) |
+|  `trustProxy`   |     **Boolean**     | `false`     | Trust reverse proxy headers (e.g. `X-Forwarded-Proto`). Enable via `REST_TRUST_PROXY=true` when running behind a load balancer such as AWS ALB/ELB to ensure correct protocol detection. |
 |    `statusMap`    |      **Object**     | `{}`        | Optional mapping of HTTP status codes to custom messages   |
+
+### Running Behind a Load Balancer
+
+When your application runs behind a reverse proxy or load balancer (e.g. AWS ALB/ELB), the load balancer terminates SSL and forwards requests to your server over HTTP internally. This means Express sees `http` as the protocol even though the original client request used `https`.
+
+To fix this, enable the `trustProxy` option:
+
+```bash
+REST_TRUST_PROXY=true
+```
+
+This tells Express to trust the `X-Forwarded-Proto` header set by the load balancer, so `request.protocol` correctly returns `https`. This is important for any functionality that generates URLs based on the incoming request protocol, such as JSON:API relationship links.
 
 ## Request Class
 
