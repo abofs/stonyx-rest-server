@@ -65,6 +65,10 @@ export default class Request {
           if (response === undefined) response = await mainCall(req, getState(req));
           if (Number.isInteger(response)) return sendStatusResponse(res, response);
           
+          // Handle redirect if set via call state object
+          const { redirect } = getState(req);
+          if (redirect) return res.redirect(redirect);
+
           // Handle pipe if set via call state object
           const { pipe } = getState(req);
           if (pipe) {
