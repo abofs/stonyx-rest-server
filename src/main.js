@@ -75,17 +75,12 @@ export default class RestServer {
     const { api } = this;
     const classInstance = new routeClass(options);
     const route = name === 'index' ? '/' : `/${name}`;
-    const { expressInstance, authorization } = classInstance;
-    
-    const routeCalls = [ expressInstance ];
-
-    // Assign auth callback if it exists
-    if (authorization) routeCalls.unshift(authorization.bind(classInstance));
+    const { expressInstance } = classInstance;
 
     classInstance.registerCalls();
     expressInstance.mountpath = route;
-    
+
     // Mount handler to main api instance
-    api.use(route, ...routeCalls);
+    api.use(route, expressInstance);
   }
 }
