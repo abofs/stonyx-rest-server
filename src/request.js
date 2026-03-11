@@ -29,20 +29,10 @@ export default class Request {
     this.expressInstance = api;
   }
 
-  // auth hook wrapper
-  authorization(req, res, next) {
-    if (!this.auth) return next();
-
-    const status = this.auth(req, Request.getState(req));
-    if (status) return Request.sendStatusResponse(res, status);
-
-    next();
-  }
-
   registerCalls() {
     const { expressInstance } = this;
-    const { getState } = Request;
-    
+    const { getState, sendStatusResponse } = Request;
+
     for (const [method, handlers] of Object.entries(this.handlers)) {
       if (!METHODS.has(method)) {
         console.warn(`Method "${method}" is not a valid HTTP method. Skipping...`);
@@ -51,9 +41,14 @@ export default class Request {
 
       for (const [route, handler] of Object.entries(handlers)) {
         expressInstance[method](route, async (req, res) => {
+          // Run auth after route matching so request.params is populated
+          if (this.auth) {
+            const status = this.auth(req, getState(req));
+            if (status) return sendStatusResponse(res, status);
+          }
+
           const callStack = [...makeArray(handler)];
           const mainCall = callStack.pop();
-          const { sendStatusResponse } = Request;
           let response;
 
           // Run middleware
