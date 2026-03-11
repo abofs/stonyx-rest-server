@@ -9,6 +9,10 @@ export default class PrivateRequest extends Request {
 
       '/failure': (_request, _state) => {
         return { data: 'foo' };
+      },
+
+      '/:id': (_request, _state) => {
+        return { data: 'param-route' };
       }
     },
 
@@ -20,5 +24,6 @@ export default class PrivateRequest extends Request {
   // The auth hook handles authentication as a middleware for all handlers in this request class
   auth(request, _state) {
     if (request.path === '/failure') return 505;
+    if (request.params?.id === 'restricted') return 403;
   }
 }

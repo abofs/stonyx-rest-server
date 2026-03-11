@@ -116,6 +116,20 @@ module('[Integration] Rest Server', function(hooks) {
 
       assert.equal(response.status, 505);
     });
+
+    test('Auth hook has access to request.params from matched route', async function(assert) {
+      const response = await fetch(`${endpoint}/private/restricted`);
+
+      assert.equal(response.status, 403, 'Auth can read request.params.id');
+    });
+
+    test('Auth hook allows non-restricted param values', async function(assert) {
+      const response = await fetch(`${endpoint}/private/allowed`);
+      const data = await response.json();
+
+      assert.equal(response.status, 200);
+      assert.equal(data.data, 'param-route');
+    });
   });
 
   module('/health', function(hooks) {
