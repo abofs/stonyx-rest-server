@@ -15,12 +15,12 @@ importers:
         specifier: ^5.1.0
         version: 5.2.1
       stonyx:
-        specifier: 0.2.3-beta.8
-        version: 0.2.3-beta.8
+        specifier: 0.2.3-beta.10
+        version: 0.2.3-beta.10
     devDependencies:
       '@stonyx/utils':
-        specifier: 0.2.3-beta.5
-        version: 0.2.3-beta.5
+        specifier: 0.2.3-beta.7
+        version: 0.2.3-beta.7
       qunit:
         specifier: ^2.24.1
         version: 2.25.0
@@ -39,8 +39,8 @@ packages:
   '@sinonjs/samsam@8.0.3':
     resolution: {integrity: sha512-hw6HbX+GyVZzmaYNh82Ecj1vdGZrqVIn/keDTg63IgAwiQPO+xCz99uG6Woqgb4tM0mUiFENKZ4cqd7IX94AXQ==}
 
-  '@stonyx/utils@0.2.3-beta.5':
-    resolution: {integrity: sha512-FRxrTg34yuXvDgxOWruZT2ybuyNIOOlLFI5SjFJeMd9oWvA5EbOKe7bi1yQ8jC/2cyp7tkEQLW6e9yQMjC0JYA==}
+  '@stonyx/utils@0.2.3-beta.7':
+    resolution: {integrity: sha512-SF6ZZZJ/f1n/+SJJDj8BJdlgvv+WDLGWGUMIkwTpruA5jv/AYJqSoVIgTpYfuMTnYDIsp3KoruaIKy/qd2ETPQ==}
 
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
@@ -338,8 +338,8 @@ packages:
     resolution: {integrity: sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==}
     engines: {node: '>= 0.8'}
 
-  stonyx@0.2.3-beta.8:
-    resolution: {integrity: sha512-1wfyNTIj3s8m6o0LU5e0TzR417BXzFRA51RAKXHISPp5n88i5CXvcfy+7dJx1tSYz+JzNjDyPa9KikxpdgF/xg==}
+  stonyx@0.2.3-beta.10:
+    resolution: {integrity: sha512-6mnL+VzBDcwGHFM9v36+b/5slBbIeLY+5vhjrI/ETgoPZmve2qAQQJ/YDTGW3HYjFEypklbuBsE8tjI1qQfuXQ==}
     hasBin: true
 
   supports-color@7.2.0:
@@ -398,7 +398,7 @@ snapshots:
       '@sinonjs/commons': 3.0.1
       type-detect: 4.1.0
 
-  '@stonyx/utils@0.2.3-beta.5': {}
+  '@stonyx/utils@0.2.3-beta.7': {}
 
   accepts@2.0.0:
     dependencies:
@@ -733,7 +733,7 @@ snapshots:
 
   statuses@2.0.2: {}
 
-  stonyx@0.2.3-beta.8:
+  stonyx@0.2.3-beta.10:
     dependencies:
       node-chronicle: 0.2.0
 
