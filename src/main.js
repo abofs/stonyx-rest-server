@@ -33,7 +33,9 @@ export default class RestServer {
   static close() {
     if (!RestServer.instance) throw new Error('RestServer has not been initialized yet');
 
-    RestServer.instance.server.close();
+    const { server } = RestServer.instance;
+    server.closeAllConnections();
+    server.close();
   }
   
   async init() {

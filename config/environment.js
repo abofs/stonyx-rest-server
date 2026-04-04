@@ -5,7 +5,7 @@ const {
   REST_PORT,
   REST_REQUEST_PATH,
   REST_TRUST_PROXY
-} = process;
+} = process.env;
 
 export default {
   enableHealthCheck: REST_HEALTH_CHECK_DISABLE !== 'true',
