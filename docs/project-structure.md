@@ -106,12 +106,16 @@ Delegates to `abofs/stonyx-workflows/.github/workflows/npm-publish.yml@main`.
 ```
 stonyx-rest-server/
 ├── .claude/
-│   ├── improvements.md
-│   └── project-structure.md      # this file
+│   └── CLAUDE.md                  # Agent entry point
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml                 # PR CI — delegates to shared workflow
 │       └── publish.yml            # NPM publish — delegates to shared workflow
+├── docs/
+│   ├── improvements.md            # Known improvement opportunities
+│   ├── index.md                   # Documentation entry point
+│   ├── project-structure.md       # This file
+│   └── release.md                 # Release instructions
 ├── config/
 │   └── environment.js             # Default config with env var overrides
 ├── src/
