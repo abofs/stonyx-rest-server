@@ -1,3 +1,7 @@
+[![CI](https://github.com/abofs/stonyx-rest-server/actions/workflows/ci.yml/badge.svg)](https://github.com/abofs/stonyx-rest-server/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/@stonyx/rest-server.svg)](https://www.npmjs.com/package/@stonyx/rest-server)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
 # @stonyx/rest-server
 
 REST server module for the [Stonyx framework](https://github.com/abofs/stonyx), providing dynamic route registration and built-in request handling with optional authentication hooks.
