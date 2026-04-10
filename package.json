@@ -10,13 +10,19 @@
     "type": "git",
     "url": "https://github.com/abofs/stonyx-rest-server"
   },
-  "main": "src/main.js",
+  "main": "dist/main.js",
+  "types": "dist/main.d.ts",
   "type": "module",
   "exports": {
-    ".": "./src/main.js"
+    ".": {
+      "types": "./dist/main.d.ts",
+      "default": "./dist/main.js"
+    }
   },
   "scripts": {
-    "test": "stonyx test",
+    "build": "tsc",
+    "build:test": "tsc -p tsconfig.test.json",
+    "test": "pnpm build && pnpm build:test && stonyx test 'dist-test/test/**/*-test.js'",
     "prepublishOnly": "npm test"
   },
   "author": "Stone Costa",
@@ -25,7 +31,7 @@
     "Stone Costa <stone.costa@synamicd.com>"
   ],
   "files": [
-    "src",
+    "dist",
     "config",
     "README.md"
   ],
@@ -40,7 +46,13 @@
   },
   "devDependencies": {
     "@stonyx/utils": "0.2.3-beta.7",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.5.2",
+    "@types/qunit": "^2.19.13",
+    "@types/sinon": "^21.0.1",
     "qunit": "^2.24.1",
-    "sinon": "^21.0.0"
+    "sinon": "^21.0.0",
+    "typescript": "^5.8.3"
   }
 }
