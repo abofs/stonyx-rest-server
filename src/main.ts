@@ -15,55 +15,71 @@
  */
 
 import cors from 'cors';
-import express from 'express';
+import express, { type Express, type Request as ExpressRequest, type Response as ExpressResponse } from 'express';
 import config from 'stonyx/config';
 import log from 'stonyx/log';
 import { forEachFileImport } from '@stonyx/utils/file';
+import type { Server } from 'http';
 
 export { default as Request } from './request.js';
 
+interface RestServerConfig {
+  port: number;
+  dir: string;
+  camelCaseRoutes?: boolean;
+  enableHealthCheck?: boolean;
+  origin?: string | string[];
+  methods?: string[];
+  trustProxy?: boolean;
+}
+
 export default class RestServer {
+  static instance: RestServer;
+
+  api!: Express;
+  server!: Server;
+
   constructor() {
     if (RestServer.instance) return RestServer.instance;
     RestServer.instance = this;
 
-    this.api = new express();
+    this.api = express();
   }
 
-  static close() {
+  static close(): void {
     if (!RestServer.instance) throw new Error('RestServer has not been initialized yet');
 
     const { server } = RestServer.instance;
     server.closeAllConnections();
     server.close();
   }
-  
-  async init() {
+
+  async init(): Promise<void> {
     await this.setupRouter();
-    
-    const { port } = config.restServer;
+
+    const { port } = (config as unknown as Record<string, RestServerConfig>).restServer;
 
     // start REST server
     this.server = this.api.listen(port);
-    log.title(`API Server is listening on port ${port}`);
+    (log as unknown as Record<string, (msg: string) => void>).title(`API Server is listening on port ${port}`);
   }
 
-  async setupRouter() {
-    const { camelCaseRoutes, dir, enableHealthCheck } = config.restServer;
+  async setupRouter(): Promise<void> {
+    const { camelCaseRoutes, dir, enableHealthCheck } = (config as unknown as Record<string, RestServerConfig>).restServer;
     this.setupGlobalMiddleware();
 
     try {
       await forEachFileImport(dir, this.mountRoute.bind(this), { rawName: !camelCaseRoutes, ignoreAccessFailure: true });
 
-      if (enableHealthCheck) this.api.get('/health', (_req, res) => res.sendStatus(200));
+      if (enableHealthCheck) this.api.get('/health', (_req: ExpressRequest, res: ExpressResponse) => res.sendStatus(200));
     } catch (error) {
-      if (config.debug) console.log(error);
-      throw log.error(`Unable to dynamically configure routes from files in ${dir}`);
+      if ((config as Record<string, unknown>).debug) console.log(error);
+      throw (log as unknown as Record<string, (msg: string) => void>).error(`Unable to dynamically configure routes from files in ${dir}`);
     }
   }
 
-  async setupGlobalMiddleware() {
-    const { origin, methods, trustProxy } = config.restServer;
+  setupGlobalMiddleware(): void {
+    const { origin, methods, trustProxy } = (config as unknown as Record<string, RestServerConfig>).restServer;
 
     if (trustProxy) this.api.set('trust proxy', true);
 
@@ -73,7 +89,8 @@ export default class RestServer {
     ]);
   }
 
-  async mountRoute(routeClass, { name, options }) {
+  mountRoute(routeClassUntyped: unknown, { name, options }: { name: string; options?: unknown }): void {
+    const routeClass = routeClassUntyped as new (options?: unknown) => { expressInstance: Express; registerCalls(): void };
     const { api } = this;
     const classInstance = new routeClass(options);
     const route = name === 'index' ? '/' : `/${name}`;
