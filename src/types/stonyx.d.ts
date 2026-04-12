@@ -1,5 +1,22 @@
 declare module 'stonyx/config' {
-  const config: Record<string, Record<string, unknown>>;
+  interface RestServerConfig {
+    port: number;
+    dir: string;
+    camelCaseRoutes?: boolean;
+    enableHealthCheck?: boolean;
+    origin?: string | string[];
+    methods?: string[];
+    trustProxy?: boolean;
+    statusMap?: Record<number, string>;
+  }
+
+  interface Config {
+    restServer: RestServerConfig;
+    debug?: boolean;
+    [key: string]: unknown;
+  }
+
+  const config: Config;
   export default config;
 }
 

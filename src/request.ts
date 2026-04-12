@@ -12,16 +12,17 @@ export type RouteHandlers = Record<string, Record<string, RequestHandler | Reque
 export default class Request {
   static stateProp = '__stonyxState';
 
-  static getState(req: Record<string, unknown>): RequestState {
+  static getState(req: ExpressRequest): RequestState {
     const { stateProp } = Request;
-    if (req[stateProp] !== undefined) return req[stateProp] as RequestState;
+    const record = req as unknown as Record<string, unknown>;
+    if (record[stateProp] !== undefined) return record[stateProp] as RequestState;
 
-    req[stateProp] = {};
-    return req[stateProp] as RequestState;
+    record[stateProp] = {};
+    return record[stateProp] as RequestState;
   }
 
   static sendStatusResponse(res: ExpressResponse, status: number): void {
-    const statusMap = (config as Record<string, Record<string, unknown>>).restServer?.statusMap as Record<number, string> || {};
+    const statusMap = config.restServer?.statusMap ?? {};
     const message = statusMap[status] || '';
 
     if (message) {
@@ -56,7 +57,7 @@ export default class Request {
         (expressInstance as unknown as Record<string, (route: string, handler: (req: ExpressRequest, res: ExpressResponse) => Promise<void>) => void>)[method](route, async (req: ExpressRequest, res: ExpressResponse) => {
           // Run auth after route matching so request.params is populated
           if (this.auth) {
-            const status = this.auth(req, getState(req as unknown as Record<string, unknown>));
+            const status = this.auth(req, getState(req));
             if (status) return sendStatusResponse(res, status);
           }
 
@@ -66,15 +67,15 @@ export default class Request {
 
           // Run middleware
           while(callStack.length) {
-            response = await callStack.shift()!.bind(this)(req, getState(req as unknown as Record<string, unknown>));
+            response = await callStack.shift()!.bind(this)(req, getState(req));
             if (response !== undefined) break;
           }
 
-          if (response === undefined) response = await mainCall(req, getState(req as unknown as Record<string, unknown>));
+          if (response === undefined) response = await mainCall(req, getState(req));
           if (Number.isInteger(response)) return sendStatusResponse(res, response as number);
 
           // Handle redirect if set via call state object
-          const state = getState(req as unknown as Record<string, unknown>);
+          const state = getState(req);
           const { redirect } = state;
           if (redirect) return res.redirect(redirect as string);
 

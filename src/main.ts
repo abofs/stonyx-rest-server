@@ -23,16 +23,6 @@ import type { Server } from 'http';
 
 export { default as Request } from './request.js';
 
-interface RestServerConfig {
-  port: number;
-  dir: string;
-  camelCaseRoutes?: boolean;
-  enableHealthCheck?: boolean;
-  origin?: string | string[];
-  methods?: string[];
-  trustProxy?: boolean;
-}
-
 export default class RestServer {
   static instance: RestServer;
 
@@ -57,15 +47,15 @@ export default class RestServer {
   async init(): Promise<void> {
     await this.setupRouter();
 
-    const { port } = (config as unknown as Record<string, RestServerConfig>).restServer;
+    const { port } = config.restServer;
 
     // start REST server
     this.server = this.api.listen(port);
-    (log as unknown as Record<string, (msg: string) => void>).title(`API Server is listening on port ${port}`);
+    log.title(`API Server is listening on port ${port}`);
   }
 
   async setupRouter(): Promise<void> {
-    const { camelCaseRoutes, dir, enableHealthCheck } = (config as unknown as Record<string, RestServerConfig>).restServer;
+    const { camelCaseRoutes, dir, enableHealthCheck } = config.restServer;
     this.setupGlobalMiddleware();
 
     try {
@@ -73,13 +63,14 @@ export default class RestServer {
 
       if (enableHealthCheck) this.api.get('/health', (_req: ExpressRequest, res: ExpressResponse) => res.sendStatus(200));
     } catch (error) {
-      if ((config as Record<string, unknown>).debug) console.log(error);
-      throw (log as unknown as Record<string, (msg: string) => void>).error(`Unable to dynamically configure routes from files in ${dir}`);
+      if (config.debug) console.log(error);
+      log.error(`Unable to dynamically configure routes from files in ${dir}`);
+      throw new Error(`Unable to dynamically configure routes from files in ${dir}`);
     }
   }
 
   setupGlobalMiddleware(): void {
-    const { origin, methods, trustProxy } = (config as unknown as Record<string, RestServerConfig>).restServer;
+    const { origin, methods, trustProxy } = config.restServer;
 
     if (trustProxy) this.api.set('trust proxy', true);
 
