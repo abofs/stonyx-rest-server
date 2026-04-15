@@ -4,7 +4,7 @@ import config from "stonyx/config";
 import { setupIntegrationTests } from "stonyx/test-helpers";
 
 const { module, test } = QUnit;
-let endpoint;
+let endpoint: string;
 
 // Driven by sample requests defined in test/sample-requests
 module('[Integration] Rest Server', function(hooks) {
