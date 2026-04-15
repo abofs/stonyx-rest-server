@@ -1,4 +1,5 @@
 import QUnit from "qunit";
+import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import config from "stonyx/config";
 import Request from "../../src/request.js";
 
@@ -8,36 +9,37 @@ const { getState, sendStatusResponse, stateProp } = Request;
 module('[Unit] Request', function() {
   module('getState', function() {
     test('creates a new state object in request object if one does not exist', async function(assert) {
-      const request = {};
+      const request = {} as ExpressRequest;
       const state = getState(request);
 
       assert.ok(state);
-      assert.ok(request[stateProp]);
+      assert.ok((request as unknown as Record<string, unknown>)[stateProp]);
     });
 
     test('returns the existing state object if one exists', async function(assert) {
-      const request = { [stateProp]: { foo: 'bar' } };
+      const request = { [stateProp]: { foo: 'bar' } } as unknown as ExpressRequest;
       const state = getState(request);
 
       assert.deepEqual(state, { foo: 'bar' });
-      assert.deepEqual(request[stateProp], { foo: 'bar' });
+      assert.deepEqual((request as unknown as Record<string, unknown>)[stateProp], { foo: 'bar' });
     });
   });
 
-  module('sendStatusResponse', function(hooks) {
+  module('sendStatusResponse', function() {
     test('sends a response with a message if status code has an entry in the statusMap', async function(assert) {
       const { restServer } = config;
-      let status, message;
+      let status: number | undefined;
+      let message: string | undefined;
 
       restServer.statusMap = { 732: 'foo' };
       sendStatusResponse({
-        status: code => {
+        status: (code: number) => {
           status = code;
-          return { send: msg => {
+          return { send: (msg: string) => {
             message = msg;
-          }}
+          }};
         }
-      }, 732);
+      } as unknown as ExpressResponse, 732);
 
       assert.equal(status, 732);
       assert.equal(message, 'foo');
@@ -46,9 +48,9 @@ module('[Unit] Request', function() {
     });
 
     test('sends a response code with no message if status code does not have an entry in the statusMap', async function(assert) {
-      let status;
+      let status: number | undefined;
 
-      sendStatusResponse({ sendStatus: code => status = code }, 919);
+      sendStatusResponse({ sendStatus: (code: number) => { status = code; } } as unknown as ExpressResponse, 919);
       assert.equal(status, 919);
     });
   });
