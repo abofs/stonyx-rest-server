@@ -22,7 +22,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc -p tsconfig.test.json",
-    "test": "pnpm build && pnpm typecheck && NODE_OPTIONS='--import tsx' stonyx test 'test/**/*-test.ts'",
+    "test": "pnpm build && pnpm typecheck && NODE_ENV=test node --import tsx/esm --import ./test/setup.ts node_modules/qunit/bin/qunit.js 'test/**/*-test.ts'",
     "prepublishOnly": "npm test"
   },
   "author": "Stone Costa",
@@ -42,10 +42,10 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^5.1.0",
-    "stonyx": "0.2.3-beta.12"
+    "stonyx": "0.2.3-beta.53"
   },
   "devDependencies": {
-    "@stonyx/utils": "0.2.3-beta.7",
+    "@stonyx/utils": "0.2.3-beta.23",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.6",
     "@types/node": "^25.5.2",
@@ -55,5 +55,11 @@
     "sinon": "^21.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.8.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "stonyx": "0.2.3-beta.53",
+      "@stonyx/utils": "0.2.3-beta.23"
+    }
   }
 }
