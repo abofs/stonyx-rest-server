@@ -1,14 +1,3 @@
-interface RestServerEnvironmentConfig {
-  enableHealthCheck: boolean;
-  origin: string;
-  methods: string;
-  dir: string;
-  port: string | number;
-  trustProxy: boolean;
-  logColor: string;
-  logMethod: string;
-}
-
 const {
   REST_CORS_ORIGIN,
   REST_CORS_METHODS,
@@ -18,7 +7,7 @@ const {
   REST_TRUST_PROXY
 } = process.env;
 
-const config: RestServerEnvironmentConfig = {
+const config = {
   enableHealthCheck: REST_HEALTH_CHECK_DISABLE !== 'true',
   origin: REST_CORS_ORIGIN ?? '*',
   methods: REST_CORS_METHODS ?? 'GET,POST,PATCH,PUT,DELETE',
