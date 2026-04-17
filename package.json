@@ -4,7 +4,7 @@
     "stonyx-async",
     "stonyx-module"
   ],
-  "version": "0.2.1-beta.57",
+  "version": "0.2.1-beta.58",
   "description": "Rest Server Module for Stonyx Framework",
   "repository": {
     "type": "git",
