@@ -45,6 +45,11 @@ export default class RestServer {
   }
 
   async init(): Promise<void> {
+    // Self-register so log.api works even when @stonyx/rest-server is in the
+    // consumer's `dependencies` (stonyx loader only merges devDependencies).
+    const { logColor = 'yellow', logMethod = 'api' } = config.restServer;
+    log.defineType(logMethod, logColor);
+
     await this.setupRouter();
 
     const { port } = config.restServer;

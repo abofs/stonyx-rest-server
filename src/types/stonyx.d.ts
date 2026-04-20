@@ -8,6 +8,8 @@ declare module 'stonyx/config' {
     methods?: string[];
     trustProxy?: boolean;
     statusMap?: Record<number, string>;
+    logColor?: string;
+    logMethod?: string;
   }
 
   interface Config {
@@ -21,7 +23,13 @@ declare module 'stonyx/config' {
 }
 
 declare module 'stonyx/log' {
-  import type Log from '@stonyx/logs';
+  interface Log {
+    api(message: string): void;
+    error(message: string, ...args: unknown[]): void;
+    title(message: string): void;
+    defineType(type: string, setting: string, options?: Record<string, unknown> | null): void;
+    [key: string]: unknown;
+  }
   const log: Log;
   export default log;
 }
