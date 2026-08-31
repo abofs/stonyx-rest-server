@@ -34,6 +34,21 @@ export default class RestServer {
     RestServer.instance = this;
 
     this.api = express();
+
+    // Match routes case-sensitively unless explicitly opted out
+    // (abofs/stonyx-rest-server#47). Set here, in the constructor, because the
+    // router is materialised lazily on first route registration -- applying
+    // this after setupRouter() would be silently ineffective.
+    //
+    // Note express 5's createApplication() takes zero arguments, so
+    // `express({ caseSensitive: true })` is a no-op; the app setting is the
+    // only mechanism that works.
+    //
+    // This closes the mount segment (/PUBLIC/... ). It does NOT propagate to
+    // the sub-apps: settings are inherited on mount, but mountRoute() calls
+    // registerCalls() before api.use(), so each child router is already built.
+    // The matching set in Request's constructor is what closes sub-paths.
+    if (config.restServer?.caseSensitiveRoutes !== false) this.api.set('case sensitive routing', true);
   }
 
   static close(): void {

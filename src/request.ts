@@ -40,6 +40,13 @@ export default class Request {
     const api = express();
     api.disable('x-powered-by');
 
+    // Match routes case-sensitively unless explicitly opted out
+    // (abofs/stonyx-rest-server#47). This is the sub-path half of the fix and
+    // must stay in the constructor: registerCalls() materialises this router,
+    // and a set applied afterwards has no effect. The parent app's setting
+    // does not reach here -- see the comment in src/main.ts.
+    if (config.restServer?.caseSensitiveRoutes !== false) api.set('case sensitive routing', true);
+
     this.expressInstance = api;
   }
 
