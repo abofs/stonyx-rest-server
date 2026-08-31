@@ -3,7 +3,7 @@ import RestServer from "@stonyx/rest-server";
 import config from "stonyx/config";
 import { setupIntegrationTests } from "stonyx/test-helpers";
 
-const { module, test, todo } = QUnit;
+const { module, test } = QUnit;
 let endpoint: string;
 
 // Driven by sample requests defined in test/sample-requests
@@ -218,17 +218,85 @@ module('[Integration] Rest Server', function(hooks) {
   // ---------------------------------------------------------------------------
   // abofs/stonyx-rest-server#50 — strict route matching (trailing slash)
   //
-  // SCAFFOLD — stubs only, no implementation yet.
-  // Marked `todo` rather than left as passing placeholders so the scaffold
-  // cannot report a false green before the assertions exist.
+  // Every AC is executed as a real HTTP request over the server the enclosing
+  // module already booted. No new listener, no new fixed-port bind.
+  //
+  // As with #47, inspecting config or asserting `app.enabled('strict routing')`
+  // satisfies none of these: express 5's `createApplication()` takes zero
+  // arguments, so a `strict: true` constructor option is a silent no-op that
+  // would pass every config-shaped check while changing no behaviour.
+  //
+  // The two ACs below are killed by DIFFERENT mutations -- AC1 by removing the
+  // call in src/request.ts, AC2 by removing the call in src/main.ts -- which is
+  // what makes the parent site independently covered rather than incidentally
+  // green. See the mutation table in the PR body.
   // ---------------------------------------------------------------------------
   module('strict routing (#50)', function() {
-    todo('AC1 — a trailing slash cannot reach a handler the auth hook denies', async function(assert) {
-      assert.ok(false, 'TODO: GET /private/failure/ -> 404 and body !== {data:foo}; negative controls');
+    test('AC1 — a trailing slash cannot reach a handler the auth hook denies', async function(assert) {
+      // The security-relevant assertion, and the reproduction from #50.
+      // Measured before the fix: 200 with body {"data":"foo"} -- the /failure
+      // handler runs and the 505 auth hook never fires, because `req.path` is
+      // `/failure/` and the hook compares against `/failure`.
+      //
+      // Closed by `strict routing` on the CHILD app (src/request.ts) alone.
+      // The parent site does nothing for this: router@2.2.0 index.js:400-401
+      // hardcodes `strict: false` for Router.prototype.use, so mount segments
+      // are structurally strict-immune. This is the opposite of #47, where
+      // use() does forward `sensitive` -- do not carry the #47 shape across.
+      //
+      // Unlike #47's AC5 there is no /:id fallthrough to absorb this: `/:id`
+      // is equally strict, so `/failure/` misses it too and the status is a
+      // true 404. Both halves are asserted -- the status, and that the
+      // auth-denied handler's body is not what came back.
+      const failure = await fetch(`${endpoint}/private/failure/`);
+      assert.equal(failure.status, 404, 'GET /private/failure/ does not reach the auth-denied /failure handler');
+      assert.notEqual(await failure.text(), '{"data":"foo"}', 'GET /private/failure/ does not return the guarded handler body');
+
+      // Sub-path trailing slash on an unguarded route misses too.
+      const publicSuccess = await fetch(`${endpoint}/public/success/`);
+      assert.equal(publicSuccess.status, 404, 'GET /public/success/ does not reach the /success handler');
+
+      // Negative controls: canonical paths are untouched.
+      const canonicalFailure = await fetch(`${endpoint}/private/failure`);
+      assert.equal(canonicalFailure.status, 505, 'auth hook still rejects GET /private/failure');
+
+      const success = await fetch(`${endpoint}/private/success`);
+      assert.equal(success.status, 200, 'GET /private/success still 200');
+      assert.deepEqual(await success.json(), { data: 'foo' }, 'the /success handler still runs');
+
+      const publicOk = await fetch(`${endpoint}/public/success`);
+      assert.equal(publicOk.status, 200, 'GET /public/success still 200');
+      assert.equal(await publicOk.text(), 'OK', 'GET /public/success still returns the default OK body');
+
+      const params = await fetch(`${endpoint}/public/url-params/foo/bar/baz`);
+      assert.equal(params.status, 200, 'GET /public/url-params/foo/bar/baz still 200');
+      assert.deepEqual(await params.json(), { x: 'foo', y: 'bar', z: 'baz' }, 'params still resolve');
     });
 
-    todo('AC2 — the parent construction site is independently covered', async function(assert) {
-      assert.ok(false, 'TODO: GET /health/ -> 404, GET /health -> 200, GET /public/ -> 200 (documented non-closure)');
+    test('AC2 — the parent construction site is independently covered', async function(assert) {
+      // `/health` is the ONLY route registered directly on the parent app
+      // (`this.api.get('/health', ...)` in setupRouter()); every route class is
+      // attached with `api.use(route, expressInstance)`. So this is the only
+      // probe in the repo that the parent's `strict routing` can change, and
+      // removing applyRouteMatching(this.api) from src/main.ts turns exactly
+      // this assertion red while AC1 stays green.
+      //
+      // Scope note: the parent site closes /health/ and nothing else. It has
+      // no security role here -- do not describe it as closing the bypass.
+      const healthSlash = await fetch(`${endpoint}/health/`);
+      assert.equal(healthSlash.status, 404, 'GET /health/ no longer matches the health check');
+
+      const health = await fetch(`${endpoint}/health`);
+      assert.equal(health.status, 200, 'GET /health still 200');
+
+      // Documented invariant, NOT a defect and NOT something to "fix" later.
+      // The mount segment's trailing slash is structurally unclosable: for both
+      // /public and /public/ the mounted sub-app receives req.path === '/', so
+      // a req.path-based auth hook sees no difference and there is no
+      // asymmetry to close. Measured 200 under all four flag combinations.
+      // The residual is req.originalUrl, which DOES differ -- see README.
+      const mountRoot = await fetch(`${endpoint}/public/`);
+      assert.equal(mountRoot.status, 200, 'GET /public/ stays 200 — the mount-segment slash is not closed by strict routing');
     });
   });
 
