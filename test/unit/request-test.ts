@@ -5,7 +5,7 @@ import type { Request as ExpressRequest, Response as ExpressResponse } from 'exp
 import config from "stonyx/config";
 import Request, { type RouteHandlers } from "../../src/request.js";
 
-const { module, test } = QUnit;
+const { module, test, todo } = QUnit;
 const { getState, sendStatusResponse, stateProp } = Request;
 
 module('[Unit] Request', function() {
@@ -115,6 +115,17 @@ module('[Unit] Request', function() {
       sinon.stub(config.restServer, 'caseSensitiveRoutes').value(false);
       assert.equal(await statusFor('/SUCCESS'), 200, 'caseSensitiveRoutes=false opts back in to case-insensitive matching');
       assert.equal(await statusFor('/success'), 200, 'the canonical path still works when opted out');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // abofs/stonyx-rest-server#50 — strictRoutes opt-out flag
+  //
+  // SCAFFOLD — stub only, no implementation yet.
+  // ---------------------------------------------------------------------------
+  module('strictRoutes config flag (#50)', function() {
+    todo('AC3 — the absent-key default is secure, and the opt-out opts out', async function(assert) {
+      assert.ok(false, 'TODO: key present-and-undefined -> /success/ 404; key absent as own property -> /success/ 404 and /success 200; strictRoutes:false -> both 200');
     });
   });
 });

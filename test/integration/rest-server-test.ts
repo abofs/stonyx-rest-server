@@ -3,7 +3,7 @@ import RestServer from "@stonyx/rest-server";
 import config from "stonyx/config";
 import { setupIntegrationTests } from "stonyx/test-helpers";
 
-const { module, test } = QUnit;
+const { module, test, todo } = QUnit;
 let endpoint: string;
 
 // Driven by sample requests defined in test/sample-requests
@@ -212,6 +212,23 @@ module('[Integration] Rest Server', function(hooks) {
       assert.notDeepEqual(body, { data: 'foo' }, 'GET /private/FAILURE does not reach the auth-denied /failure handler');
       assert.deepEqual(body, { data: 'param-route' }, 'GET /private/FAILURE falls through to the /:id catch-all');
       assert.equal(response.status, 200, 'status is 200 via /:id — documented, not a regression');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // abofs/stonyx-rest-server#50 — strict route matching (trailing slash)
+  //
+  // SCAFFOLD — stubs only, no implementation yet.
+  // Marked `todo` rather than left as passing placeholders so the scaffold
+  // cannot report a false green before the assertions exist.
+  // ---------------------------------------------------------------------------
+  module('strict routing (#50)', function() {
+    todo('AC1 — a trailing slash cannot reach a handler the auth hook denies', async function(assert) {
+      assert.ok(false, 'TODO: GET /private/failure/ -> 404 and body !== {data:foo}; negative controls');
+    });
+
+    todo('AC2 — the parent construction site is independently covered', async function(assert) {
+      assert.ok(false, 'TODO: GET /health/ -> 404, GET /health -> 200, GET /public/ -> 200 (documented non-closure)');
     });
   });
 
