@@ -168,7 +168,15 @@ module('[Integration] Rest Server', function(hooks) {
 
     test('AC3 — mount-segment case is rejected', async function(assert) {
       // Closed by `case sensitive routing` on the parent app (src/main.ts).
-      // Measured before the fix: 200 / 200 / 200.
+      // Measured before the fix: 200 / 505 / 200.
+      //
+      // The middle value is the one worth reading. A case-varied MOUNT segment
+      // still lands in private.ts's sub-app, where `req.path` is the
+      // correctly-cased `/failure`, so the auth hook fires and returns 505 even
+      // pre-fix. Mount-segment case variation was never the auth bypass; it is
+      // a sub-path miss inside an already-mounted app that reaches a handler
+      // the hook would have denied. That is why AC5 below has to probe
+      // `/private/FAILURE` and not `/PRIVATE/failure`.
       const publicRoute = await fetch(`${endpoint}/PUBLIC/success`);
       assert.equal(publicRoute.status, 404, 'GET /PUBLIC/success does not reach the /public mount');
 

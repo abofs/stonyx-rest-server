@@ -103,9 +103,13 @@ module('[Unit] Request', function() {
       // Sanity: the canonical path is reachable regardless of the flag.
       assert.equal(await statusFor('/success'), 200, 'GET /success is 200 with the config untouched');
 
-      // Default (key absent) must be secure — a mixed-case path must miss.
+      // Default must be secure — a mixed-case path must miss. Note the stub
+      // leaves the key PRESENT and `undefined`; it does not remove it. That is
+      // equivalent under the source's `!== false` guard, but say what is
+      // actually being asserted: this covers the `undefined` case, not the
+      // own-property-absent case.
       sinon.stub(config.restServer, 'caseSensitiveRoutes').value(undefined);
-      assert.equal(await statusFor('/SUCCESS'), 404, 'defaults to case-sensitive when the key is absent');
+      assert.equal(await statusFor('/SUCCESS'), 404, 'defaults to case-sensitive when the key is unset');
 
       // Explicit opt-out restores the old, loose matching.
       sinon.stub(config.restServer, 'caseSensitiveRoutes').value(false);
