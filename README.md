@@ -79,14 +79,20 @@ Configuration is read from `stonyx/config` under `restServer`:
 |      `origin`     | **String \| Array** | `'*'`       | CORS origin(s) allowed                                     |
 |    `methods`      | **String**          | `'GET,POST,PATCH,PUT,DELETE'` | CORS allowed methods                              |
 | `enableHealthCheck` |   **Boolean**     | `true`      | Register `GET /health` endpoint (disable via `REST_HEALTH_CHECK_DISABLE=true`) |
-| `caseSensitiveRoutes` | **Boolean**   | `true`      | Match route paths case-sensitively. Disable via `REST_CASE_SENSITIVE_ROUTES=false`. See [Case-Sensitive Routing](#case-sensitive-routing) -- **disabling this re-opens a security hole**. |
+| `caseSensitiveRoutes` | **Boolean**   | `true`      | Match route paths case-sensitively. Disable via `REST_CASE_SENSITIVE_ROUTES=false`. See [Case-Sensitive Routing](#case-sensitive-routing) — **disabling this re-opens a security hole**. |
 |  `trustProxy`   |     **Boolean**     | `false`     | Trust reverse proxy headers (e.g. `X-Forwarded-Proto`). Enable via `REST_TRUST_PROXY=true` when running behind a load balancer such as AWS ALB/ELB to ensure correct protocol detection. |
 |    `statusMap`    |      **Object**     | `{}`        | Optional mapping of HTTP status codes to custom messages   |
 
 ### Case-Sensitive Routing
 
-Routes match **case-sensitively by default**. `GET /users` reaches a route mounted
-at `/users`; `GET /Users` and `GET /users/ID` do not.
+Routes match **case-sensitively by default**. `GET /users` reaches a route
+mounted at `/users`; `GET /Users` does not reach that mount, and
+`GET /users/Success` does not reach a `/success` handler registered inside it.
+
+Read [What this does not do](#what-this-does-not-do) before you rely on that
+sentence. Two things it does not say: "does not reach the handler" is not the
+same as "404", and casing is only one of the two ways express matches more
+loosely than the authorization predicates written against it.
 
 This is deliberate and security-relevant. Express matches case-insensitively by
 default, which means any authorization written against the request URL can be
@@ -100,21 +106,55 @@ DELETE /ANIMALS/22     -> 204      (record destroyed)
 
 The consumer's predicate is stricter than the router that dispatched the
 request, so the router hands the handler a request the predicate would have
-rejected. Case-sensitive matching removes that asymmetry: the path a handler
-sees can only ever be the exact registered casing.
+rejected. Case-sensitive matching closes the **casing** half of that asymmetry:
+the path a handler sees can only ever be the exact registered casing.
 
-**What this does not do.** Case-sensitive routing does not normalise path
-*parameter values*. If your `auth()` hook rejects `params.id === 'restricted'`,
-then `GET /private/RESTRICTED` still reaches the handler -- the router matched
-the route correctly and `restricted` and `RESTRICTED` are different values.
-Record ids are legitimately case-sensitive, so this is a comparison your
-application owns. Compare param values with the same case-handling you use when
-you look them up.
+It does not close the asymmetry itself. Express exposes `case sensitive
+routing` and `strict routing` as a pair of loose-by-default router settings and
+this change sets only the first, so the identical bypass is still reachable by
+appending a slash. Measured on this release against this repo's own fixture:
 
-The framework also does not redirect or rewrite mixed-case requests to their
-canonical casing. Whether `/Users` is a typo to forgive or an attack to reject
-is an application policy decision, and encoding it here would mint another
-variant of the bug above.
+```
+GET /private/failure   -> 505      (auth hook fires, request blocked)
+GET /private/failure/  -> 200      (auth hook never fires, handler runs)
+```
+
+That is the same defect, one character instead of a case shift — translated to
+the example above, `DELETE /animals/22` is filtered and `DELETE /animals/22/`
+destroys the record. It is tracked as
+[#50](https://github.com/abofs/stonyx-rest-server/issues/50) and is not fixed
+here; it is a second consumer-visible behaviour change that needs its own flag
+and its own release note.
+
+**So do not drop a URL-normalizing defence you already have on the strength of
+this section.** If your authorization compares `req.path` or `req.originalUrl`,
+keep whatever normalization you have until #50 ships.
+
+#### What this does not do
+
+**It does not normalize path *parameter values*.** If your `auth()` hook rejects
+`params.id === 'restricted'`, then `GET /private/RESTRICTED` still reaches the
+handler — the router matched the route correctly, and `restricted` and
+`RESTRICTED` are different values. Record ids are legitimately case-sensitive,
+so this is a comparison your application owns. Compare param values with the
+same case-handling you use when you look them up.
+
+**A sub-path that misses is not necessarily a 404.** If the route class also
+registers a param route such as `/:id`, a mis-cased sub-path is absorbed by it
+rather than rejected. `GET /private/FAILURE` misses `/failure` and is dispatched
+to `/:id` with `id="FAILURE"` — a different handler, at 200, not a miss; this
+repo's AC5 asserts exactly that. A class exposing `/orders/summary` alongside
+`/orders/:id` will send `GET /orders/SUMMARY` into the `/:id` handler and its
+database lookup. The param route's own `auth()` hook still runs, so this is an
+expectation defect rather than a bypass — but plan for a reroute, not a 404.
+
+**It does not cover trailing slashes.** See
+[#50](https://github.com/abofs/stonyx-rest-server/issues/50) above.
+
+**It does not redirect or rewrite** mixed-case requests to their canonical
+casing. Whether `/Users` is a typo to forgive or an attack to reject is an
+application policy decision, and encoding it here would mint another variant of
+the bug above.
 
 #### Opting out
 
@@ -122,7 +162,7 @@ variant of the bug above.
 REST_CASE_SENSITIVE_ROUTES=false
 ```
 
-**This restores the vulnerability described above** -- any URL-based
+**This restores the vulnerability described above** — any URL-based
 authorization in your application becomes bypassable by changing case. It
 exists as a one-line remediation for an existing deployment, not as a
 configuration to run on.

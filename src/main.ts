@@ -37,7 +37,7 @@ export default class RestServer {
     this.api = express();
 
     // Closes the mount segment (/PUBLIC/...) for abofs/stonyx-rest-server#47.
-    // Must stay in the constructor: the router is materialised lazily on first
+    // Must stay in the constructor: the router is materialized lazily on first
     // route registration, so applying this after setupRouter() is silently
     // ineffective. The matching call in Request's constructor is what closes
     // sub-paths -- see src/route-matching.ts for why both are required.

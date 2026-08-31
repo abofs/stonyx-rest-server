@@ -189,7 +189,7 @@ module('[Integration] Rest Server', function(hooks) {
 
     test('AC4 — sub-path case is rejected', async function(assert) {
       // Closed only by `case sensitive routing` on the child app (src/request.ts),
-      // set in the constructor before registerCalls() materialises the router.
+      // set in the constructor before registerCalls() materializes the router.
       // A parent-only fix, or a child set applied after route registration,
       // passes AC3 and returns 200 here. `public.ts` has no bare `/:id`, so a
       // miss is a true 404.

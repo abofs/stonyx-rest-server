@@ -12,7 +12,7 @@ import config from 'stonyx/config';
  * by the time the parent's setting could reach it.
  *
  * Both callers invoke this from a constructor, and must keep doing so: express
- * materialises a router lazily on first route registration, and a setting
+ * materializes a router lazily on first route registration, and a setting
  * applied afterwards is silently ineffective -- no throw, no warning.
  *
  * The guard is `!== false`, not a plain truthy check, and that polarity is
