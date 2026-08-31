@@ -51,6 +51,7 @@ From `config/environment.js`. All values are overridable via environment variabl
 | Option              | Type              | Default                       | Env Var                    | Description                                                     |
 |---------------------|-------------------|-------------------------------|----------------------------|-----------------------------------------------------------------|
 | `enableHealthCheck` | **Boolean**       | `true`                        | `REST_HEALTH_CHECK_DISABLE=true` to disable | Registers `GET /health` returning 200                     |
+| `caseSensitiveRoutes` | **Boolean**     | `true`                        | `REST_CASE_SENSITIVE_ROUTES=false` to disable | Match route paths case-sensitively. Applied via `app.set('case sensitive routing', true)` in **both** the `RestServer` constructor and the `Request` constructor -- see below. Disabling re-opens the URL-authorization bypass of #47 |
 | `trustProxy`        | **Boolean**       | `false`                       | `REST_TRUST_PROXY=true` to enable           | Trust reverse proxy headers (`X-Forwarded-Proto`) for correct protocol detection behind load balancers |
 | `origin`            | **String**        | `'*'`                         | `REST_CORS_ORIGIN`         | CORS allowed origin(s)                                          |
 | `methods`           | **String**        | `'GET,POST,PATCH,PUT,DELETE'` | `REST_CORS_METHODS`        | CORS allowed methods                                            |
@@ -62,6 +63,27 @@ From `config/environment.js`. All values are overridable via environment variabl
 Additional config used (not rest-server-specific):
 - `config.debug` (top-level Stonyx config) — if truthy, logs errors during route setup
 - `config.restServer.statusMap` (optional, no default in environment.js) — maps status codes to custom message strings
+### Case-sensitive routing (#47)
+
+`caseSensitiveRoutes` must be applied at **both** express construction sites, and
+in each case **before any route is registered on that instance**:
+
+- `RestServer` constructor (`src/main.ts`) -- closes the mount segment (`/PUBLIC/...`)
+- `Request` constructor (`src/request.ts`) -- closes sub-paths (`/public/SUCCESS`)
+
+Neither alone is sufficient. Express inherits settings on mount, but the child
+router is materialised lazily on first route registration and `mountRoute()`
+calls `registerCalls()` before `api.use()`, so the parent's setting never
+reaches the child. Setting it after route registration is silently ineffective.
+
+Note that `express({ caseSensitive: true })` does **not** work: express 5's
+`createApplication()` takes zero arguments and forwards nothing. The app setting
+is the only mechanism. `@types/express` declares zero parameters, so TypeScript
+catches the mistake -- plain-JS consumers get a silent no-op.
+
+Scope limit: this does not normalise path *parameter values*.
+`/private/RESTRICTED` reaches the handler before and after.
+
 - `config.restServer.camelCaseRoutes` (optional, no default in environment.js) — when falsy, passes `rawName: true` to `forEachFileImport` so filenames are used as-is for route paths
 
 ## Test Structure

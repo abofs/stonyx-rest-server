@@ -79,8 +79,65 @@ Configuration is read from `stonyx/config` under `restServer`:
 |      `origin`     | **String \| Array** | `'*'`       | CORS origin(s) allowed                                     |
 |    `methods`      | **String**          | `'GET,POST,PATCH,PUT,DELETE'` | CORS allowed methods                              |
 | `enableHealthCheck` |   **Boolean**     | `true`      | Register `GET /health` endpoint (disable via `REST_HEALTH_CHECK_DISABLE=true`) |
+| `caseSensitiveRoutes` | **Boolean**   | `true`      | Match route paths case-sensitively. Disable via `REST_CASE_SENSITIVE_ROUTES=false`. See [Case-Sensitive Routing](#case-sensitive-routing) -- **disabling this re-opens a security hole**. |
 |  `trustProxy`   |     **Boolean**     | `false`     | Trust reverse proxy headers (e.g. `X-Forwarded-Proto`). Enable via `REST_TRUST_PROXY=true` when running behind a load balancer such as AWS ALB/ELB to ensure correct protocol detection. |
 |    `statusMap`    |      **Object**     | `{}`        | Optional mapping of HTTP status codes to custom messages   |
+
+### Case-Sensitive Routing
+
+Routes match **case-sensitively by default**. `GET /users` reaches a route mounted
+at `/users`; `GET /Users` and `GET /users/ID` do not.
+
+This is deliberate and security-relevant. Express matches case-insensitively by
+default, which means any authorization written against the request URL can be
+walked past by changing the case of the request:
+
+```
+GET    /owners/angela  -> 404      (correctly filtered)
+GET    /OwNeRs/angela  -> 200      (full record)
+DELETE /ANIMALS/22     -> 204      (record destroyed)
+```
+
+The consumer's predicate is stricter than the router that dispatched the
+request, so the router hands the handler a request the predicate would have
+rejected. Case-sensitive matching removes that asymmetry: the path a handler
+sees can only ever be the exact registered casing.
+
+**What this does not do.** Case-sensitive routing does not normalise path
+*parameter values*. If your `auth()` hook rejects `params.id === 'restricted'`,
+then `GET /private/RESTRICTED` still reaches the handler -- the router matched
+the route correctly and `restricted` and `RESTRICTED` are different values.
+Record ids are legitimately case-sensitive, so this is a comparison your
+application owns. Compare param values with the same case-handling you use when
+you look them up.
+
+The framework also does not redirect or rewrite mixed-case requests to their
+canonical casing. Whether `/Users` is a typo to forgive or an attack to reject
+is an application policy decision, and encoding it here would mint another
+variant of the bug above.
+
+#### Opting out
+
+```bash
+REST_CASE_SENSITIVE_ROUTES=false
+```
+
+**This restores the vulnerability described above** -- any URL-based
+authorization in your application becomes bypassable by changing case. It
+exists as a one-line remediation for an existing deployment, not as a
+configuration to run on.
+
+You need it if clients call your endpoints with casing that does not match the
+mount path. Mount paths come from filenames, so this is not hypothetical:
+
+- with `camelCaseRoutes` truthy, `phone-number.ts` mounts at `/phoneNumber`, and
+  `GET /phonenumber` now returns 404
+- with `camelCaseRoutes` falsy, filenames are used verbatim, so
+  `Users.ts` mounts at `/Users` and `GET /users` now returns 404
+
+A request that stops matching returns express's default `404 Cannot GET /x` with
+no log line and no stack, so it looks like a deploy that dropped a route. Set
+the flag to restore service, then fix the client's casing and remove the flag.
 
 ### Running Behind a Load Balancer
 
