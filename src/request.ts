@@ -1,6 +1,7 @@
 import express, { type Request as ExpressRequest, type Response as ExpressResponse, type Express } from 'express';
 import config from 'stonyx/config';
 import { makeArray } from '@stonyx/utils/object';
+import applyRouteMatching from './route-matching.js';
 
 const METHODS = new Set(['get', 'post', 'put', 'delete', 'patch']);
 
@@ -39,6 +40,12 @@ export default class Request {
   constructor() {
     const api = express();
     api.disable('x-powered-by');
+
+    // Closes sub-paths (/public/SUCCESS) for abofs/stonyx-rest-server#47.
+    // Must stay in the constructor: registerCalls() materializes this router,
+    // and a set applied afterwards has no effect. The parent app's setting
+    // does not reach here -- see src/route-matching.ts.
+    applyRouteMatching(api);
 
     this.expressInstance = api;
   }

@@ -17,7 +17,7 @@ REST server module for the Stonyx framework. Provides dynamic route registration
 
 Singleton class wrapping an Express 5 instance.
 
-- **Constructor** — enforces singleton via `RestServer.instance`; creates the Express app with `new express()`
+- **Constructor** — enforces singleton via `RestServer.instance`; creates the Express app with `express()`
 - **`init()`** — calls `setupRouter()`, then starts listening on the configured port
 - **`setupRouter()`** — calls `setupGlobalMiddleware()`, then uses `forEachFileImport` (from `@stonyx/utils/file`) to dynamically import all files in the configured `dir` and mount each as a route via `mountRoute()`. Optionally registers a `/health` endpoint.
 - **`setupGlobalMiddleware()`** — attaches `cors()` and `express.json()` middleware to the Express app
@@ -44,6 +44,11 @@ Base class for route definitions. Each file in the requests directory exports a 
 
 Valid HTTP methods (enforced): `get`, `post`, `put`, `delete`, `patch`
 
+### applyRouteMatching (src/route-matching.ts)
+
+Single-function module holding this package's route-matching settings, called
+from both express constructors above. See [Case-sensitive routing (#47)](#case-sensitive-routing-47).
+
 ## Configuration Reference
 
 From `config/environment.js`. All values are overridable via environment variables.
@@ -51,6 +56,7 @@ From `config/environment.js`. All values are overridable via environment variabl
 | Option              | Type              | Default                       | Env Var                    | Description                                                     |
 |---------------------|-------------------|-------------------------------|----------------------------|-----------------------------------------------------------------|
 | `enableHealthCheck` | **Boolean**       | `true`                        | `REST_HEALTH_CHECK_DISABLE=true` to disable | Registers `GET /health` returning 200                     |
+| `caseSensitiveRoutes` | **Boolean**     | `true`                        | `REST_CASE_SENSITIVE_ROUTES=false` to disable | Match route paths case-sensitively. Applied via `app.set('case sensitive routing', true)` in **both** the `RestServer` constructor and the `Request` constructor -- see below. Disabling re-opens the URL-authorization bypass of #47 |
 | `trustProxy`        | **Boolean**       | `false`                       | `REST_TRUST_PROXY=true` to enable           | Trust reverse proxy headers (`X-Forwarded-Proto`) for correct protocol detection behind load balancers |
 | `origin`            | **String**        | `'*'`                         | `REST_CORS_ORIGIN`         | CORS allowed origin(s)                                          |
 | `methods`           | **String**        | `'GET,POST,PATCH,PUT,DELETE'` | `REST_CORS_METHODS`        | CORS allowed methods                                            |
@@ -63,6 +69,49 @@ Additional config used (not rest-server-specific):
 - `config.debug` (top-level Stonyx config) — if truthy, logs errors during route setup
 - `config.restServer.statusMap` (optional, no default in environment.js) — maps status codes to custom message strings
 - `config.restServer.camelCaseRoutes` (optional, no default in environment.js) — when falsy, passes `rawName: true` to `forEachFileImport` so filenames are used as-is for route paths
+
+### Case-sensitive routing (#47)
+
+Both express construction sites call `applyRouteMatching()` from
+`src/route-matching.ts`, and each must call it **before any route is registered
+on that instance**:
+
+- `RestServer` constructor (`src/main.ts`) — closes the mount segment (`/PUBLIC/...`)
+- `Request` constructor (`src/request.ts`) — closes sub-paths (`/public/SUCCESS`)
+
+Neither alone is sufficient. Express inherits settings on mount, but the child
+router is materialized lazily on first route registration and `mountRoute()`
+calls `registerCalls()` before `api.use()`, so the parent's setting never
+reaches the child. Setting it after route registration is silently ineffective —
+no throw, no warning.
+
+The predicate lives in `src/route-matching.ts` rather than being written out at
+each call site so that one test can anchor it. `test/unit/request-test.ts` AC6
+reaches it through `Request`, which covers the `RestServer` half too. While the
+expression was duplicated, both of these mutations of the `src/main.ts` copy
+kept the suite green at 28/0: `!== false` → `=== true`, and dropping the
+condition entirely.
+
+The guard is `!== false`, not a truthy check, and that polarity is load-bearing.
+`trustProxy` and `enableHealthCheck` default falsy, so a missing key fails safe
+for them; this flag defaults truthy, so a truthy check would fail **open** for a
+consumer whose shipped config predates the key.
+
+Note that `express({ caseSensitive: true })` does **not** work: express 5's
+`createApplication()` takes zero arguments and forwards nothing. The app setting
+is the only mechanism. `@types/express` declares zero parameters, so TypeScript
+catches the mistake — plain-JS consumers get a silent no-op.
+
+Scope limits — this closes the casing half of the defect and no more:
+
+- It does not normalize path *parameter values*. `/private/RESTRICTED` reaches
+  the handler before and after.
+- It does not cover trailing slashes. `strict routing` is the sibling express
+  setting and is still off, so `/private/failure/` reaches the guarded handler
+  at 200 while `/private/failure` is blocked at 505. Tracked as #50; not fixed
+  here.
+- A mis-cased sub-path is not necessarily a 404 — a sibling param route absorbs
+  it. AC5 asserts this: `/private/FAILURE` is dispatched to `/:id` at 200.
 
 ## Test Structure
 

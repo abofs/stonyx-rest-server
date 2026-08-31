@@ -19,6 +19,7 @@ import express, { type Express, type Request as ExpressRequest, type Response as
 import config from 'stonyx/config';
 import log from 'stonyx/log';
 import { forEachFileImport } from '@stonyx/utils/file';
+import applyRouteMatching from './route-matching.js';
 import type { Server } from 'http';
 
 export { default as Request } from './request.js';
@@ -34,6 +35,13 @@ export default class RestServer {
     RestServer.instance = this;
 
     this.api = express();
+
+    // Closes the mount segment (/PUBLIC/...) for abofs/stonyx-rest-server#47.
+    // Must stay in the constructor: the router is materialized lazily on first
+    // route registration, so applying this after setupRouter() is silently
+    // ineffective. The matching call in Request's constructor is what closes
+    // sub-paths -- see src/route-matching.ts for why both are required.
+    applyRouteMatching(this.api);
   }
 
   static close(): void {

@@ -132,6 +132,89 @@ module('[Integration] Rest Server', function(hooks) {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // abofs/stonyx-rest-server#47 — case-sensitive route matching
+  //
+  // Every AC is executed as a real HTTP request over the server the enclosing
+  // module already booted. No new listener, no new fixed-port bind.
+  //
+  // Inspecting config, or asserting `app.enabled('case sensitive routing')`,
+  // satisfies none of these: express 5's `createApplication()` takes zero
+  // arguments, so a `caseSensitive: true` constructor option is a silent no-op
+  // that would pass every config-shaped check while changing no behaviour.
+  // ---------------------------------------------------------------------------
+  module('case-sensitive routing (#47)', function() {
+    test('AC1 — negative control: correctly-cased routing is untouched', async function(assert) {
+      const success = await fetch(`${endpoint}/public/success`);
+      assert.equal(success.status, 200, 'GET /public/success still 200');
+      assert.equal(await success.text(), 'OK', 'GET /public/success still returns the default OK body');
+
+      const params = await fetch(`${endpoint}/public/url-params/foo/bar/baz`);
+      assert.equal(params.status, 200, 'GET /public/url-params/foo/bar/baz still 200');
+      assert.deepEqual(await params.json(), { x: 'foo', y: 'bar', z: 'baz' }, 'params still resolve');
+
+      const health = await fetch(`${endpoint}/health`);
+      assert.equal(health.status, 200, 'GET /health still 200');
+    });
+
+    test('AC2 — negative control: the auth hook still fires on the canonical path', async function(assert) {
+      const failure = await fetch(`${endpoint}/private/failure`);
+      assert.equal(failure.status, 505, 'auth hook still rejects GET /private/failure');
+
+      const success = await fetch(`${endpoint}/private/success`);
+      assert.equal(success.status, 200, 'GET /private/success still 200');
+      assert.deepEqual(await success.json(), { data: 'foo' }, 'the /success handler still runs');
+    });
+
+    test('AC3 — mount-segment case is rejected', async function(assert) {
+      // Closed by `case sensitive routing` on the parent app (src/main.ts).
+      // Measured before the fix: 200 / 505 / 200.
+      //
+      // The middle value is the one worth reading. A case-varied MOUNT segment
+      // still lands in private.ts's sub-app, where `req.path` is the
+      // correctly-cased `/failure`, so the auth hook fires and returns 505 even
+      // pre-fix. Mount-segment case variation was never the auth bypass; it is
+      // a sub-path miss inside an already-mounted app that reaches a handler
+      // the hook would have denied. That is why AC5 below has to probe
+      // `/private/FAILURE` and not `/PRIVATE/failure`.
+      const publicRoute = await fetch(`${endpoint}/PUBLIC/success`);
+      assert.equal(publicRoute.status, 404, 'GET /PUBLIC/success does not reach the /public mount');
+
+      const privateRoute = await fetch(`${endpoint}/PRIVATE/failure`);
+      assert.equal(privateRoute.status, 404, 'GET /PRIVATE/failure does not reach the /private mount');
+
+      const health = await fetch(`${endpoint}/HEALTH`);
+      assert.equal(health.status, 404, 'GET /HEALTH does not reach /health');
+    });
+
+    test('AC4 — sub-path case is rejected', async function(assert) {
+      // Closed only by `case sensitive routing` on the child app (src/request.ts),
+      // set in the constructor before registerCalls() materializes the router.
+      // A parent-only fix, or a child set applied after route registration,
+      // passes AC3 and returns 200 here. `public.ts` has no bare `/:id`, so a
+      // miss is a true 404.
+      const success = await fetch(`${endpoint}/public/SUCCESS`);
+      assert.equal(success.status, 404, 'GET /public/SUCCESS does not reach the /success handler');
+
+      const bind = await fetch(`${endpoint}/public/BIND`);
+      assert.equal(bind.status, 404, 'GET /public/BIND does not reach the /bind handler');
+    });
+
+    test('AC5 — a case-varied path cannot reach a handler the auth hook denies', async function(assert) {
+      // The security-relevant assertion. Before the fix, GET /private/FAILURE
+      // reaches the /failure handler and returns {data:'foo'} with the 505 auth
+      // hook never firing. After the fix it misses /failure and is absorbed by
+      // private.ts's `/:id` catch-all, so the STATUS is 200 either way — the
+      // assertion is on which handler ran, not on the status.
+      const response = await fetch(`${endpoint}/private/FAILURE`);
+      const body = await response.json();
+
+      assert.notDeepEqual(body, { data: 'foo' }, 'GET /private/FAILURE does not reach the auth-denied /failure handler');
+      assert.deepEqual(body, { data: 'param-route' }, 'GET /private/FAILURE falls through to the /:id catch-all');
+      assert.equal(response.status, 200, 'status is 200 via /:id — documented, not a regression');
+    });
+  });
+
   module('/health', function(hooks) {
     test('Health check endpoint is configured automatically', async function(assert) {
       const response = await fetch(`${endpoint}/health`);
