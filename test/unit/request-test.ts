@@ -3,7 +3,7 @@ import type { Request as ExpressRequest, Response as ExpressResponse } from 'exp
 import config from "stonyx/config";
 import Request from "../../src/request.js";
 
-const { module, test } = QUnit;
+const { module, test, todo } = QUnit;
 const { getState, sendStatusResponse, stateProp } = Request;
 
 module('[Unit] Request', function() {
@@ -54,5 +54,16 @@ module('[Unit] Request', function() {
       assert.equal(status, 919);
     });
   });
-});
 
+  // ---------------------------------------------------------------------------
+  // abofs/stonyx-rest-server#47 — caseSensitiveRoutes opt-out flag
+  //
+  // Scaffold: TODO stub only, no implementation yet. Binds an ephemeral port
+  // via listen(0) so it adds no fixed-port binding to the suite.
+  // ---------------------------------------------------------------------------
+  module('caseSensitiveRoutes config flag (#47)', function() {
+    todo('AC6 — the opt-out actually opts out, and defaults to secure', async function(assert) {
+      assert.ok(false, 'TODO: caseSensitiveRoutes=false -> GET /SUCCESS 200; key absent -> GET /SUCCESS 404; via listen(0)');
+    });
+  });
+});

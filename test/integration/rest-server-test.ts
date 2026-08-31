@@ -3,7 +3,7 @@ import RestServer from "@stonyx/rest-server";
 import config from "stonyx/config";
 import { setupIntegrationTests } from "stonyx/test-helpers";
 
-const { module, test } = QUnit;
+const { module, test, todo } = QUnit;
 let endpoint: string;
 
 // Driven by sample requests defined in test/sample-requests
@@ -129,6 +129,34 @@ module('[Integration] Rest Server', function(hooks) {
 
       assert.equal(response.status, 200);
       assert.equal(data.data, 'param-route');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // abofs/stonyx-rest-server#47 — case-sensitive route matching
+  //
+  // Scaffold: TODO stubs only, no implementation yet. Every AC is executed as a
+  // real HTTP request over the already-booted server (no new listener).
+  // ---------------------------------------------------------------------------
+  module('case-sensitive routing (#47)', function() {
+    todo('AC1 — negative control: correctly-cased routing is untouched', async function(assert) {
+      assert.ok(false, 'TODO: GET /public/success -> 200 "OK"; /public/url-params/foo/bar/baz -> 200 params; /health -> 200');
+    });
+
+    todo('AC2 — negative control: the auth hook still fires on the canonical path', async function(assert) {
+      assert.ok(false, 'TODO: GET /private/failure -> 505; GET /private/success -> 200 {data:foo}');
+    });
+
+    todo('AC3 — mount-segment case is rejected (src/main.ts)', async function(assert) {
+      assert.ok(false, 'TODO: GET /PUBLIC/success -> 404; /PRIVATE/failure -> 404; /HEALTH -> 404');
+    });
+
+    todo('AC4 — sub-path case is rejected (src/request.ts)', async function(assert) {
+      assert.ok(false, 'TODO: GET /public/SUCCESS -> 404; /public/BIND -> 404');
+    });
+
+    todo('AC5 — a case-varied path cannot reach a handler the auth hook denies', async function(assert) {
+      assert.ok(false, 'TODO: GET /private/FAILURE body is {data:param-route}, not {data:foo} (status stays 200)');
     });
   });
 
