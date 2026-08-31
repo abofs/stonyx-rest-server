@@ -79,58 +79,74 @@ Configuration is read from `stonyx/config` under `restServer`:
 |      `origin`     | **String \| Array** | `'*'`       | CORS origin(s) allowed                                     |
 |    `methods`      | **String**          | `'GET,POST,PATCH,PUT,DELETE'` | CORS allowed methods                              |
 | `enableHealthCheck` |   **Boolean**     | `true`      | Register `GET /health` endpoint (disable via `REST_HEALTH_CHECK_DISABLE=true`) |
-| `caseSensitiveRoutes` | **Boolean**   | `true`      | Match route paths case-sensitively. Disable via `REST_CASE_SENSITIVE_ROUTES=false`. See [Case-Sensitive Routing](#case-sensitive-routing) — **disabling this re-opens a security hole**. |
+| `caseSensitiveRoutes` | **Boolean**   | `true`      | Match route paths case-sensitively. Disable via `REST_CASE_SENSITIVE_ROUTES=false`. See [Route Matching Strictness](#route-matching-strictness) — **disabling this re-opens a security hole**. |
+| `strictRoutes`    | **Boolean**   | `true`      | Match route paths strictly, so a trailing slash does not match a route registered without one. Disable via `REST_STRICT_ROUTES=false`. See [Route Matching Strictness](#route-matching-strictness) — **disabling this re-opens a security hole**, and note `GET /health/` now 404s. |
 |  `trustProxy`   |     **Boolean**     | `false`     | Trust reverse proxy headers (e.g. `X-Forwarded-Proto`). Enable via `REST_TRUST_PROXY=true` when running behind a load balancer such as AWS ALB/ELB to ensure correct protocol detection. |
 |    `statusMap`    |      **Object**     | `{}`        | Optional mapping of HTTP status codes to custom messages   |
 
-### Case-Sensitive Routing
+### Route Matching Strictness
 
-Routes match **case-sensitively by default**. `GET /users` reaches a route
-mounted at `/users`; `GET /Users` does not reach that mount, and
-`GET /users/Success` does not reach a `/success` handler registered inside it.
+Routes match **case-sensitively and strictly by default**. Two settings, both
+on, both applied at both express construction sites:
 
-Read [What this does not do](#what-this-does-not-do) before you rely on that
-sentence. Two things it does not say: "does not reach the handler" is not the
-same as "404", and casing is only one of the two ways express matches more
-loosely than the authorization predicates written against it.
+| axis | setting | example that no longer matches |
+|---|---|---|
+| casing | `case sensitive routing` | `GET /users/Success` -> does not reach `/success` |
+| trailing slash | `strict routing` | `GET /users/success/` -> does not reach `/success` |
 
-This is deliberate and security-relevant. Express matches case-insensitively by
-default, which means any authorization written against the request URL can be
-walked past by changing the case of the request:
+Read [What this does not do](#what-this-does-not-do) and
+[Upgrading](#upgrading-behaviour-changes) before you rely on that. Two things
+the table does not say: "does not reach the handler" is not the same as "404",
+and one edge of the trailing-slash axis is **not** closed and cannot be.
+
+This is deliberate and security-relevant. Express matches both case-insensitively
+and slash-insensitively by default, which means any authorization written
+against the request URL can be walked past by changing the case of the request,
+or by appending one character:
 
 ```
-GET    /owners/angela  -> 404      (correctly filtered)
-GET    /OwNeRs/angela  -> 200      (full record)
-DELETE /ANIMALS/22     -> 204      (record destroyed)
+GET    /owners/angela   -> 404      (correctly filtered)
+GET    /OwNeRs/angela   -> 200      (full record)     <- closed by case sensitive routing
+GET    /owners/angela/  -> 200      (full record)     <- closed by strict routing
+DELETE /ANIMALS/22      -> 204      (record destroyed)
+DELETE /animals/22/     -> 204      (record destroyed)
 ```
 
 The consumer's predicate is stricter than the router that dispatched the
 request, so the router hands the handler a request the predicate would have
-rejected. Case-sensitive matching closes the **casing** half of that asymmetry:
-the path a handler sees can only ever be the exact registered casing.
-
-It does not close the asymmetry itself. Express exposes `case sensitive
-routing` and `strict routing` as a pair of loose-by-default router settings and
-this change sets only the first, so the identical bypass is still reachable by
-appending a slash. Measured on this release against this repo's own fixture:
+rejected. Measured against this repo's own fixture, before and after:
 
 ```
-GET /private/failure   -> 505      (auth hook fires, request blocked)
-GET /private/failure/  -> 200      (auth hook never fires, handler runs)
+                          before   after
+GET /private/failure        505      505    (auth hook fires, request blocked)
+GET /private/failure/       200      404    (auth hook never fired; now a miss)
+GET /private/FAILURE        200      200    (absorbed by /:id — see below)
 ```
 
-That is the same defect, one character instead of a case shift — translated to
-the example above, `DELETE /animals/22` is filtered and `DELETE /animals/22/`
-destroys the record. It is tracked as
-[#50](https://github.com/abofs/stonyx-rest-server/issues/50) and is not fixed
-here; it is a second consumer-visible behaviour change that needs its own flag
-and its own release note.
-
-**So do not drop a URL-normalizing defence you already have on the strength of
-this section.** If your authorization compares `req.path` or `req.originalUrl`,
-keep whatever normalization you have until #50 ships.
+For a handler that authorizes on `req.path`, the path it sees can now only ever
+be the exact registered spelling, in the exact registered casing, with no
+trailing slash. That closes [#47](https://github.com/abofs/stonyx-rest-server/issues/47)
+and [#50](https://github.com/abofs/stonyx-rest-server/issues/50).
 
 #### What this does not do
+
+**It does not close the trailing slash on a mount root, and no setting can.**
+This is the one edge that remains open, so do not read the section above as
+closing the class outright:
+
+```
+GET /public   -> req.path '/'   req.originalUrl '/public'
+GET /public/  -> req.path '/'   req.originalUrl '/public/'
+```
+
+Express's router applies mount-prefix matching with `strict: false`
+unconditionally (`router@2.2.0`, `index.js:400-401`), so both forms reach the
+mounted route class and both arrive with `req.path === '/'`. A hook authorizing
+on `req.path` cannot tell them apart, so for that hook there is no asymmetry to
+exploit. **A hook comparing `req.originalUrl` still sees two different strings,
+and `strictRoutes` does not change that.** If your authorization compares
+`req.originalUrl` rather than `req.path`, keep whatever URL normalization you
+have.
 
 **It does not normalize path *parameter values*.** If your `auth()` hook rejects
 `params.id === 'restricted'`, then `GET /private/RESTRICTED` still reaches the
@@ -148,36 +164,64 @@ repo's AC5 asserts exactly that. A class exposing `/orders/summary` alongside
 database lookup. The param route's own `auth()` hook still runs, so this is an
 expectation defect rather than a bypass — but plan for a reroute, not a 404.
 
-**It does not cover trailing slashes.** See
-[#50](https://github.com/abofs/stonyx-rest-server/issues/50) above.
+Note the two axes differ here. A *trailing slash* is not absorbed by `/:id`,
+because `/:id` is equally strict: `GET /private/failure/` misses `/failure` and
+misses `/:id`, and is a true 404.
 
-**It does not redirect or rewrite** mixed-case requests to their canonical
-casing. Whether `/Users` is a typo to forgive or an attack to reject is an
-application policy decision, and encoding it here would mint another variant of
-the bug above.
+**It does not redirect or rewrite** mixed-case or trailing-slash requests to
+their canonical form. Whether `/Users` is a typo to forgive or an attack to
+reject is an application policy decision, and encoding it here would mint
+another variant of the bug above.
+
+#### Upgrading: behaviour changes
+
+Both settings change which requests match, so both are consumer-visible.
+
+**`GET /health/` now returns 404.** `GET /health` is unaffected. This is the
+change most likely to page someone, and it is an **availability** problem rather
+than a 404 you will read about in a log: if a Kubernetes liveness probe, an ELB
+target-group health check or an uptime monitor is pointed at the trailing-slash
+form, it starts failing and the deployment gets marked unhealthy and cycled.
+This module emits no request logging, so the only symptom is the probe going
+red. **Check your probe URLs before upgrading.**
+
+Also affected:
+
+- **Param routes.** `/resource/:id/` no longer matches. Any client calling
+  `/private/restricted/` gets a 404 where it previously got the param route.
+- **Trailing-slash-normalizing proxies.** nginx `try_files`/`rewrite`, Apache
+  `DirectorySlash On` and some CDN edge rules append a slash; behind one of
+  those, every route stops matching at once.
+- **Mount paths from filenames.** With `camelCaseRoutes` truthy, `phone-number.ts`
+  mounts at `/phoneNumber`, so `GET /phonenumber` returns 404; with it falsy,
+  `Users.ts` mounts at `/Users`, so `GET /users` returns 404.
+
+A request that stops matching returns express's default `404 Cannot GET /x` with
+no log line and no stack, so it looks like a deploy that dropped a route.
 
 #### Opting out
 
+Two separate flags, one per axis:
+
 ```bash
-REST_CASE_SENSITIVE_ROUTES=false
+REST_CASE_SENSITIVE_ROUTES=false   # restores case-insensitive matching (#47)
+REST_STRICT_ROUTES=false           # restores trailing-slash tolerance (#50)
 ```
 
-**This restores the vulnerability described above** — any URL-based
-authorization in your application becomes bypassable by changing case. It
-exists as a one-line remediation for an existing deployment, not as a
-configuration to run on.
+or equivalently `restServer: { caseSensitiveRoutes: false, strictRoutes: false }`.
 
-You need it if clients call your endpoints with casing that does not match the
-mount path. Mount paths come from filenames, so this is not hypothetical:
+**They are deliberately separate keys, and neither implies the other.** Slash
+tolerance is a legitimate need — a health-check URL you cannot change today is
+the common case. Casing tolerance almost never is. Folding them into one flag
+would force anyone who needs the first to accept the second, which is why a
+consumer who took the `#47` opt-out still has to set `REST_STRICT_ROUTES=false`
+separately to keep trailing slashes working.
 
-- with `camelCaseRoutes` truthy, `phone-number.ts` mounts at `/phoneNumber`, and
-  `GET /phonenumber` now returns 404
-- with `camelCaseRoutes` falsy, filenames are used verbatim, so
-  `Users.ts` mounts at `/Users` and `GET /users` now returns 404
-
-A request that stops matching returns express's default `404 Cannot GET /x` with
-no log line and no stack, so it looks like a deploy that dropped a route. Set
-the flag to restore service, then fix the client's casing and remove the flag.
+**Each flag restores the corresponding vulnerability described above** — the
+URL-based authorization in your application becomes bypassable along that axis
+again. They exist as one-line remediations for an existing deployment, not as a
+configuration to run on. Set the flag to restore service, then fix the client
+and remove the flag.
 
 ### Running Behind a Load Balancer
 
