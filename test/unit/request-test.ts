@@ -1,8 +1,9 @@
 import QUnit from "qunit";
 import type { AddressInfo } from "net";
-import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
+import express, { type Request as ExpressRequest, type Response as ExpressResponse } from 'express';
 import config from "stonyx/config";
 import Request, { type RouteHandlers } from "../../src/request.js";
+import applyRouteMatching from "../../src/route-matching.js";
 
 const { module, test } = QUnit;
 const { getState, sendStatusResponse, stateProp } = Request;
@@ -18,6 +19,16 @@ const { getState, sendStatusResponse, stateProp } = Request;
 class RouteMatchingFixtureRequest extends Request {
   handlers: RouteHandlers = {
     get: {
+      // The mount-ROOT handler, needed by #54's AC2 and by nothing else. At a
+      // mount root express reports req.path === '/' for both `/fixture` and
+      // `/fixture/`, so this is the only registration under which the
+      // canonical-target check has anything to decide. Adding it does not
+      // disturb the #47/#50 probes: `/SUCCESS` and `/success/` match neither
+      // `/success` nor `/`.
+      '/': (_request: ExpressRequest, _state: Record<string, unknown>) => {
+        return { data: 'root' };
+      },
+
       '/success': (_request: ExpressRequest, _state: Record<string, unknown>) => {
         return { data: 'ok' };
       }
@@ -44,6 +55,45 @@ async function statusFor(path: string): Promise<number> {
   }
 }
 
+// Same as statusFor(), but MOUNTED -- the fixture's express instance is
+// attached to a parent app at `/fixture`, exactly as RestServer.mountRoute()
+// does it (registerCalls() first, then api.use(route, expressInstance), with
+// applyRouteMatching() applied to the parent in its constructor).
+//
+// #54's AC2 needs this and statusFor() cannot substitute. Unmounted, req.baseUrl
+// is '' and there is no mount root: `GET /success/` is rejected by strict
+// routing before the canonical-target check ever sees it, so the flag has no
+// observable effect. Mounted, `GET /fixture/` reaches the '/' handler with
+// req.path === '/' and req.originalUrl === '/fixture/' -- the exact asymmetry
+// the flag governs.
+//
+// `fetch` is adequate here and raw sockets are not required: a single trailing
+// slash survives fetch's normalisation unchanged (what fetch cannot express is
+// dot-segments and absolute-form targets, which is why the INTEGRATION probes
+// use a socket). Verified by this AC's own opted-out assertion: with
+// canonicalRoutes=false the same fetch call returns 200, so the slash is
+// demonstrably reaching the server.
+async function mountedStatusFor(path: string): Promise<number> {
+  const instance = new RouteMatchingFixtureRequest();
+  instance.registerCalls();
+
+  const parent = express();
+  applyRouteMatching(parent);
+  parent.use('/fixture', instance.expressInstance);
+
+  const server = parent.listen(0);
+  await new Promise<void>(resolve => server.once('listening', () => resolve()));
+  const { port } = server.address() as AddressInfo;
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}${path}`);
+    return response.status;
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+}
+
 // Captures and restores the OWN-property state of one `config.restServer` key.
 //
 // Deliberately ONE copy, shared by the #47 and #50 flag modules, for the same
@@ -56,7 +106,7 @@ async function statusFor(path: string): Promise<number> {
 // -- the one a `!== false` guard has to survive -- is unreachable through
 // sinon, and the restore has to put back the prior own-property state rather
 // than a value.
-function ownStateTracker(key: 'caseSensitiveRoutes' | 'strictRoutes') {
+function ownStateTracker(key: 'caseSensitiveRoutes' | 'strictRoutes' | 'canonicalRoutes') {
   const { restServer } = config;
   let hadOwnProperty = false;
   let originalValue: boolean | undefined;
@@ -231,18 +281,62 @@ module('[Unit] Request', function() {
   // ---------------------------------------------------------------------------
   // abofs/stonyx-rest-server#54 - canonicalRoutes opt-out flag
   //
-  // SCAFFOLD ONLY. Stubbed with QUnit `todo`, not a passing placeholder: a
-  // `todo` that passes is reported as a FAILURE, so this stub cannot survive
-  // into the finished fix unnoticed.
+  // Real HTTP over a real socket on an ephemeral port (listen(0)), against a
+  // MOUNTED fixture -- see mountedStatusFor() above for why the unmounted
+  // helper cannot express this.
   //
   // This module is NOT redundant with the integration AC, for the same measured
   // reason #50's AC3 is not: the shipped default is `true`, so a fail-open
   // guard (`=== true` instead of `!== false`) leaves every integration
   // assertion green. This is the only tier that can see that mutant.
+  //
+  // Both failure shapes are mandatory and neither subsumes the other. Measured
+  // previously for the two sibling keys: a guard failing open ONLY on
+  // absent-own-property survived a present-and-`undefined`-only assertion at
+  // 31 pass / 0 fail. sinon cannot reach the absent shape at all -- see
+  // ownStateTracker().
+  //
+  // The two halves of #54's coverage are also disjoint. This AC guards the
+  // READ in src/route-matching.ts (it sets `canonicalRoutes` on the config
+  // object directly, so the shipped default is out of the picture). The
+  // integration AC guards the shipped DEFAULT in config/environment.js, which
+  // is deliberately not pinned in test/config/environment.ts (#43). Inverting
+  // that default to `=== 'true'` turns AC1 red and leaves this AC green.
   // ---------------------------------------------------------------------------
-  module('canonicalRoutes config flag (#54)', function() {
-    test.todo('AC2 - the absent-key default is secure, and the opt-out opts out', function(assert) {
-      assert.ok(false, 'AC2 not implemented: both failure shapes of the `!== false` guard against a mounted fixture');
+  module('canonicalRoutes config flag (#54)', function(hooks) {
+    const { restServer } = config;
+    const tracker = ownStateTracker('canonicalRoutes');
+
+    hooks.beforeEach(tracker.capture);
+    hooks.afterEach(tracker.restore);
+
+    test('AC2 - the absent-key default is secure, and the opt-out opts out', async function(assert) {
+      // 1. Sanity: the canonical target is reachable with the config untouched.
+      assert.equal(await mountedStatusFor('/fixture'), 200, '1. GET /fixture is 200 with the config untouched');
+
+      // 2. Key PRESENT and `undefined`.
+      restServer.canonicalRoutes = undefined;
+      assert.equal(await mountedStatusFor('/fixture/'), 404, '2. defaults to rejecting the mount-root slash when the key is present and undefined');
+
+      // 3/4. Key ABSENT as an own property -- the state a consumer whose
+      // shipped restServer block predates the key is in, and reachable in
+      // practice because the stonyx loader only merges a module's
+      // config/environment.js for modules in devDependencies. Strictly stronger
+      // than 2: a guard failing open only on this shape survives 2.
+      delete restServer.canonicalRoutes;
+      assert.notOk(Object.prototype.hasOwnProperty.call(restServer, 'canonicalRoutes'), '3. precondition: canonicalRoutes is not an own property');
+      assert.equal(await mountedStatusFor('/fixture/'), 404, '4. defaults to rejecting the mount-root slash when the key is absent entirely');
+
+      // 5. and the canonical target still works in that state.
+      assert.equal(await mountedStatusFor('/fixture'), 200, '5. the canonical target still works when the key is absent');
+
+      // 6/7. Explicit opt-out genuinely re-opens the bypass. This assertion is
+      // also what proves assertions 2 and 4 are not vacuous: the same fetch
+      // call returns 200 here, so `/fixture/` is demonstrably reaching the
+      // server rather than being swallowed by the client.
+      restServer.canonicalRoutes = false;
+      assert.equal(await mountedStatusFor('/fixture/'), 200, '6. canonicalRoutes=false re-opens the mount-root slash');
+      assert.equal(await mountedStatusFor('/fixture'), 200, '7. the canonical target still works when opted out');
     });
   });
 });
