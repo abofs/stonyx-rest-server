@@ -4,6 +4,7 @@ declare module 'stonyx/config' {
     dir: string;
     camelCaseRoutes?: boolean;
     caseSensitiveRoutes?: boolean;
+    strictRoutes?: boolean;
     enableHealthCheck?: boolean;
     origin?: string | string[];
     methods?: string[];

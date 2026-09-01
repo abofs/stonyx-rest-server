@@ -41,10 +41,14 @@ export default class Request {
     const api = express();
     api.disable('x-powered-by');
 
-    // Closes sub-paths (/public/SUCCESS) for abofs/stonyx-rest-server#47.
-    // Must stay in the constructor: registerCalls() materializes this router,
-    // and a set applied afterwards has no effect. The parent app's setting
-    // does not reach here -- see src/route-matching.ts.
+    // Applies BOTH route-matching settings: case sensitive routing
+    // (abofs/stonyx-rest-server#47) and strict routing (#50). For #47 this
+    // call closes sub-paths (/public/SUCCESS) and the parent's call closes the
+    // mount segment; for #50 THIS call closes the entire trailing-slash
+    // authorization bypass on its own, and the parent's call has no security
+    // role. Must stay in the constructor: registerCalls() materializes this
+    // router, and a set applied afterwards has no effect. The parent app's
+    // setting does not reach here -- see src/route-matching.ts.
     applyRouteMatching(api);
 
     this.expressInstance = api;

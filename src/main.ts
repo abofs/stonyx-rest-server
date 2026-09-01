@@ -36,11 +36,19 @@ export default class RestServer {
 
     this.api = express();
 
-    // Closes the mount segment (/PUBLIC/...) for abofs/stonyx-rest-server#47.
+    // Applies BOTH route-matching settings: case sensitive routing
+    // (abofs/stonyx-rest-server#47) and strict routing (#50). The two do not
+    // have the same role at this site:
+    //   - #47: this call closes the mount segment (/PUBLIC/...). The matching
+    //     call in Request's constructor closes sub-paths; both are required.
+    //   - #50: this call closes exactly /health/, the only route registered
+    //     directly on this app. It has NO security role for #50 -- do not
+    //     describe it as having one. Router.prototype.use hardcodes
+    //     `strict: false`, so mount segments are strict-immune, and the call in
+    //     Request's constructor closes the trailing-slash bypass on its own.
     // Must stay in the constructor: the router is materialized lazily on first
     // route registration, so applying this after setupRouter() is silently
-    // ineffective. The matching call in Request's constructor is what closes
-    // sub-paths -- see src/route-matching.ts for why both are required.
+    // ineffective. See src/route-matching.ts for the per-site split.
     applyRouteMatching(this.api);
   }
 

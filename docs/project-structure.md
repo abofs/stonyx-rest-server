@@ -47,7 +47,11 @@ Valid HTTP methods (enforced): `get`, `post`, `put`, `delete`, `patch`
 ### applyRouteMatching (src/route-matching.ts)
 
 Single-function module holding this package's route-matching settings, called
-from both express constructors above. See [Case-sensitive routing (#47)](#case-sensitive-routing-47).
+from both express constructors above. Holds two settings: `case sensitive
+routing` (#47) and `strict routing` (#50). See
+[Case-sensitive routing (#47)](#case-sensitive-routing-47) and
+[Strict routing (#50)](#strict-routing-50) — the two settings do NOT have the
+same per-site behaviour, and the difference matters.
 
 ## Configuration Reference
 
@@ -57,6 +61,7 @@ From `config/environment.js`. All values are overridable via environment variabl
 |---------------------|-------------------|-------------------------------|----------------------------|-----------------------------------------------------------------|
 | `enableHealthCheck` | **Boolean**       | `true`                        | `REST_HEALTH_CHECK_DISABLE=true` to disable | Registers `GET /health` returning 200                     |
 | `caseSensitiveRoutes` | **Boolean**     | `true`                        | `REST_CASE_SENSITIVE_ROUTES=false` to disable | Match route paths case-sensitively. Applied via `app.set('case sensitive routing', true)` in **both** the `RestServer` constructor and the `Request` constructor -- see below. Disabling re-opens the URL-authorization bypass of #47 |
+| `strictRoutes`      | **Boolean**       | `true`                        | `REST_STRICT_ROUTES=false` to disable       | Match route paths strictly -- a trailing slash does not match a route registered without one. Applied via `app.set('strict routing', true)` in the same two constructors. Disabling re-opens the URL-authorization bypass of #50. Separate key from `caseSensitiveRoutes` on purpose -- see below |
 | `trustProxy`        | **Boolean**       | `false`                       | `REST_TRUST_PROXY=true` to enable           | Trust reverse proxy headers (`X-Forwarded-Proto`) for correct protocol detection behind load balancers |
 | `origin`            | **String**        | `'*'`                         | `REST_CORS_ORIGIN`         | CORS allowed origin(s)                                          |
 | `methods`           | **String**        | `'GET,POST,PATCH,PUT,DELETE'` | `REST_CORS_METHODS`        | CORS allowed methods                                            |
@@ -106,12 +111,76 @@ Scope limits — this closes the casing half of the defect and no more:
 
 - It does not normalize path *parameter values*. `/private/RESTRICTED` reaches
   the handler before and after.
-- It does not cover trailing slashes. `strict routing` is the sibling express
-  setting and is still off, so `/private/failure/` reaches the guarded handler
-  at 200 while `/private/failure` is blocked at 505. Tracked as #50; not fixed
-  here.
 - A mis-cased sub-path is not necessarily a 404 — a sibling param route absorbs
   it. AC5 asserts this: `/private/FAILURE` is dispatched to `/:id` at 200.
+- It does not cover trailing slashes. That is the sibling `strict routing`
+  setting, closed separately in #50 — see below.
+
+### Strict routing (#50)
+
+`strict routing` closes the trailing-slash half of the same defect:
+`/private/failure/` reached the guarded handler at 200 while `/private/failure`
+was blocked at 505, because the `auth` hook compares `req.path` against
+`/failure`. Set in the same `applyRouteMatching()` call, so one predicate covers
+both construction sites.
+
+**The per-site split from #47 does NOT transfer, and this is the easiest thing
+to get wrong here.** Measured per site:
+
+| probe | neither | parent only | child only | both |
+|---|---|---|---|---|
+| `/private/failure/` | 200 | 200 | **404** | **404** |
+| `/public/success/` | 200 | 200 | **404** | **404** |
+| `/health/` | 200 | **404** | 200 | **404** |
+| `/public/` (mount root) | 200 | 200 | 200 | 200 |
+
+- The **child** site (`src/request.ts`) closes the entire security defect alone.
+- The **parent** site (`src/main.ts`) closes exactly one thing in this repo:
+  `/health/`, the only route registered directly on the parent app. It has no
+  security role for #50 — do not describe it as having one.
+
+The cause is concrete: `router@2.2.0` `index.js:400-401` hardcodes
+`strict: false, end: false` for `Router.prototype.use`, so **mount segments are
+structurally strict-immune.** This is the opposite of `sensitive`, which `use()`
+*does* forward (line 399) and which is why #47's parent site closed
+`/PUBLIC/...`.
+
+> **This paragraph is the single authoritative citation for that upstream
+> behaviour.** The same fact is stated (without file-and-line coordinates) in
+> `README.md`, `docs/agents/security-reviewer.md`, `src/route-matching.ts` and
+> `test/integration/rest-server-test.ts`, each of which points here. Verified
+> against `router@2.2.0`; **re-verify these line numbers when `router` is
+> upgraded** — they are pinned in this one place so an upgrade invalidates one
+> line rather than five.
+
+That has a consequence worth stating so nobody expects `strictRoutes` to cover
+it: **the mount-root trailing slash `/public/` cannot be closed by an express
+setting.** Both `/public` and `/public/` reach the sub-app with
+`req.path === '/'`, so a `req.path` hook sees no difference, a test asserting
+`/public/` → 404 could never pass, and #50's integration AC2 asserts it stays
+**200** precisely to record that.
+
+**Unclosable by a setting is not unclosable.** The residual is
+`req.originalUrl`, which *does* differ, and a consumer hook authorizing on it is
+bypassed by one character — measured: `GET /admin` → 401, `GET /admin/` → 200
+with the guarded handler running unauthenticated. That is a live bypass of the
+same class as #47 and #50, and it is closable *by this module* (a canonical-path
+check ahead of the `auth` call in `Request.registerCalls()`, or opt-in
+normalizing middleware). It is tracked as
+[#54](https://github.com/abofs/stonyx-rest-server/issues/54) and is disclosed to
+consumers in the README. Do not record it as impossible.
+
+`strictRoutes` is a **separate config key**, not a rename or a reuse of
+`caseSensitiveRoutes`. Coupling them would force any consumer who legitimately
+needs trailing-slash tolerance — a health-check URL that cannot change today is
+the common case — to re-open #47's case bypass to get it. Renaming the key would
+also silently no-op for consumers who adopted `caseSensitiveRoutes` in
+`0.2.1-beta.90`.
+
+Consumer-visible behaviour change: `GET /health/` goes 200 → 404, and param
+routes such as `/resource/:id/` stop matching. See the README's Upgrading
+section — the health-check break is an availability incident, not a 404 anyone
+will read in a log, because this module emits no request logging.
 
 ## Test Structure
 
