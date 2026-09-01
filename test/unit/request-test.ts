@@ -1,5 +1,4 @@
 import QUnit from "qunit";
-import sinon from "sinon";
 import type { AddressInfo } from "net";
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import config from "stonyx/config";
@@ -43,6 +42,35 @@ async function statusFor(path: string): Promise<number> {
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
+}
+
+// Captures and restores the OWN-property state of one `config.restServer` key.
+//
+// Deliberately ONE copy, shared by the #47 and #50 flag modules, for the same
+// reason `statusFor()` is: both modules assert on the same predicate in
+// src/route-matching.ts, and both have to reach the same two states.
+//
+// sinon cannot express those states. `sinon.stub(obj, key).value(...)` always
+// materializes an OWN property, and stubbing a key that is not present at all
+// throws `Cannot stub non-existent property`. So the absent-own-property case
+// -- the one a `!== false` guard has to survive -- is unreachable through
+// sinon, and the restore has to put back the prior own-property state rather
+// than a value.
+function ownStateTracker(key: 'caseSensitiveRoutes' | 'strictRoutes') {
+  const { restServer } = config;
+  let hadOwnProperty = false;
+  let originalValue: boolean | undefined;
+
+  return {
+    capture() {
+      hadOwnProperty = Object.prototype.hasOwnProperty.call(restServer, key);
+      originalValue = restServer[key];
+    },
+    restore() {
+      if (hadOwnProperty) restServer[key] = originalValue;
+      else delete restServer[key];
+    }
+  };
 }
 
 module('[Unit] Request', function() {
@@ -101,26 +129,42 @@ module('[Unit] Request', function() {
   // no fixed-port binding to the suite. Asserting that the config key exists,
   // or that `app.enabled('case sensitive routing')` is true, would not
   // distinguish a working fix from express's silent no-op constructor option.
+  //
+  // Both failure shapes of the `!== false` guard are covered here, matching
+  // #50's AC3 below. Covering only the key-present-and-`undefined` shape is not
+  // enough, and that was measurable rather than theoretical: with AC6 stubbing
+  // only `undefined`, a guard that fails open ONLY when the key is absent as an
+  // own property (`hasOwn(restServer,'caseSensitiveRoutes') && ... !== false`)
+  // left the suite at 31 pass / 0 fail. The same mutant on the `strictRoutes`
+  // line was killed by AC3 at 30/1. This module closes that asymmetry, which
+  // the source comment in src/route-matching.ts asserts.
   // ---------------------------------------------------------------------------
   module('caseSensitiveRoutes config flag (#47)', function(hooks) {
-    hooks.afterEach(function() {
-      sinon.restore();
-    });
+    const tracker = ownStateTracker('caseSensitiveRoutes');
+
+    hooks.beforeEach(tracker.capture);
+    hooks.afterEach(tracker.restore);
 
     test('AC6 — the opt-out actually opts out, and defaults to secure', async function(assert) {
+      const { restServer } = config;
+
       // Sanity: the canonical path is reachable regardless of the flag.
       assert.equal(await statusFor('/success'), 200, 'GET /success is 200 with the config untouched');
 
-      // Default must be secure — a mixed-case path must miss. Note the stub
-      // leaves the key PRESENT and `undefined`; it does not remove it. That is
-      // equivalent under the source's `!== false` guard, but say what is
-      // actually being asserted: this covers the `undefined` case, not the
-      // own-property-absent case.
-      sinon.stub(config.restServer, 'caseSensitiveRoutes').value(undefined);
-      assert.equal(await statusFor('/SUCCESS'), 404, 'defaults to case-sensitive when the key is unset');
+      // Default must be secure — a mixed-case path must miss. Key PRESENT and
+      // `undefined`; this is the shape the previous version of this AC covered.
+      restServer.caseSensitiveRoutes = undefined;
+      assert.equal(await statusFor('/SUCCESS'), 404, 'defaults to case-sensitive when the key is present and undefined');
+
+      // Key ABSENT as an own property. Strictly stronger than the assertion
+      // above: a guard failing open only on this shape survives that one.
+      delete restServer.caseSensitiveRoutes;
+      assert.notOk(Object.prototype.hasOwnProperty.call(restServer, 'caseSensitiveRoutes'), 'precondition: caseSensitiveRoutes is not an own property');
+      assert.equal(await statusFor('/SUCCESS'), 404, 'defaults to case-sensitive when the key is absent entirely');
+      assert.equal(await statusFor('/success'), 200, 'the canonical path still works when the key is absent');
 
       // Explicit opt-out restores the old, loose matching.
-      sinon.stub(config.restServer, 'caseSensitiveRoutes').value(false);
+      restServer.caseSensitiveRoutes = false;
       assert.equal(await statusFor('/SUCCESS'), 200, 'caseSensitiveRoutes=false opts back in to case-insensitive matching');
       assert.equal(await statusFor('/success'), 200, 'the canonical path still works when opted out');
     });
@@ -140,26 +184,24 @@ module('[Unit] Request', function() {
   //
   // Properties are manipulated directly rather than with sinon.stub().value():
   // stub() always creates an OWN property, so it cannot express the
-  // own-property-absent state that every existing consumer's shipped config is
-  // actually in. That state is the one a `!== false` guard has to survive.
+  // own-property-absent state -- see ownStateTracker() above.
+  //
+  // That state is NOT what a consumer of this repo's own config sees: when
+  // config/environment.js is merged, `strictRoutes` IS an own property. It is
+  // reachable for a consumer whose merged config never included this module's
+  // defaults -- the stonyx loader only merges a module's config/environment.js
+  // for modules in devDependencies (see the self-registration note in
+  // RestServer.init()), so a consumer carrying @stonyx/rest-server in
+  // `dependencies` reads a `config.restServer` these defaults never reached.
+  // A hand-written restServer block that predates the key lands in the same
+  // state. That is the state a `!== false` guard has to survive.
   // ---------------------------------------------------------------------------
   module('strictRoutes config flag (#50)', function(hooks) {
     const { restServer } = config;
-    let hadOwnProperty: boolean;
-    let originalValue: boolean | undefined;
+    const tracker = ownStateTracker('strictRoutes');
 
-    hooks.beforeEach(function() {
-      hadOwnProperty = Object.prototype.hasOwnProperty.call(restServer, 'strictRoutes');
-      originalValue = restServer.strictRoutes;
-    });
-
-    hooks.afterEach(function() {
-      if (hadOwnProperty) {
-        restServer.strictRoutes = originalValue;
-      } else {
-        delete restServer.strictRoutes;
-      }
-    });
+    hooks.beforeEach(tracker.capture);
+    hooks.afterEach(tracker.restore);
 
     test('AC3 — the absent-key default is secure, and the opt-out opts out', async function(assert) {
       // Sanity: the canonical path is reachable regardless of the flag.
@@ -169,9 +211,11 @@ module('[Unit] Request', function() {
       restServer.strictRoutes = undefined;
       assert.equal(await statusFor('/success/'), 404, 'defaults to strict when the key is present and undefined');
 
-      // Key ABSENT as an own property -- the state a consumer's config that
-      // predates this key is in. #47's AC6 only covered the `undefined` case;
-      // this covers the one that actually ships.
+      // Key ABSENT as an own property -- the state a consumer whose config
+      // never had this module's defaults merged is in. #47's AC6 now covers
+      // the same two shapes; it originally covered only `undefined`, and a
+      // guard failing open on absent-own-property survived at 31/0 because of
+      // it.
       delete restServer.strictRoutes;
       assert.notOk(Object.prototype.hasOwnProperty.call(restServer, 'strictRoutes'), 'precondition: strictRoutes is not an own property');
       assert.equal(await statusFor('/success/'), 404, 'defaults to strict when the key is absent entirely');
