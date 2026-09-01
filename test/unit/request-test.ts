@@ -45,9 +45,15 @@ class RouteMatchingFixtureRequest extends Request {
 // LITERAL route against the raw, still-encoded path, so `/fixture/%73uccess`
 // misses `/success` and 404s with or without the fix, and a literal-only
 // fixture cannot express the defect at all. But adding `/:id` to the shared
-// fixture ABSORBS the #47 and #50 probes: `/SUCCESS` and `/success/` would
-// match `/:id` at 200 where those ACs assert 404. Measured, by adding `/:id`
-// to RouteMatchingFixtureRequest: #47's AC6 and #50's AC3 both turn red.
+// fixture ABSORBS #47's probe: `/SUCCESS` would match `/:id` at 200 where AC6
+// asserts 404. Measured, by adding `/:id` to RouteMatchingFixtureRequest:
+// 40 pass / 1 fail, #47's AC6 the only failure.
+//
+// #50's AC3 stays GREEN under that same edit, and the asymmetry is worth
+// stating rather than rounding off: `/:id` is equally strict, so `/success/`
+// misses it too and is still a true 404. Only the CASE axis is absorbed by a
+// param route. An earlier draft of this comment claimed both went red; it was
+// wrong, and it was the measurement rather than the reading that caught it.
 //
 // So the two fixtures are separate for a measured, stated reason rather than by
 // drift, and the thing they must not do -- keep two copies of the same probe --
