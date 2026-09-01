@@ -29,7 +29,7 @@
 
 - The `mountRoute` public API is consumed by `@stonyx/orm` (for ORM request routes) and `@stonyx/oauth` (for auth routes) — changes to `mountRoute` signature, the `registerCalls()` contract, or the `expressInstance` property pattern break these consumers
 - Express 5 uses different path matching rules than Express 4 — parameter patterns, regex routes, and trailing slash handling may behave differently; validate route patterns against Express 5 documentation
-- The server only has three source files (`main.ts`, `request.ts`, `types/`) — the small surface area means most changes have outsized impact; even minor refactors to `Request.registerCalls()` affect every downstream route
+- The server has a very small source surface — `main.ts`, `request.ts`, `route-matching.ts` (added by #47, and now the config-read site for all four route-matching keys) and `types/` — so most changes have outsized impact; even minor refactors to `Request.registerCalls()` affect every downstream route, and that handler closure is where #54's and #56's per-request checks run
 - The `makeArray` utility from `@stonyx/utils/object` normalizes handler values (single function or array) — validation should confirm that both forms produce identical execution behavior
 - Published package includes only `dist/`, `config/`, and `README.md` — verify no source maps or test artifacts are included in the npm package
 - The health check endpoint (`GET /health`) returning 200 is the standard liveness probe — disabling it via `REST_HEALTH_CHECK_DISABLE` affects deployment readiness checks in production

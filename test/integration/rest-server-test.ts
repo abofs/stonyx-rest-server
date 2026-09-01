@@ -4,7 +4,7 @@ import RestServer from "@stonyx/rest-server";
 import config from "stonyx/config";
 import { setupIntegrationTests } from "stonyx/test-helpers";
 
-const { module, test } = QUnit;
+const { module, test, todo } = QUnit;
 let endpoint: string;
 
 interface RawResponse {
@@ -539,6 +539,275 @@ module('[Integration] Rest Server', function(hooks) {
       const indexRoot = await rawRequest('/', port);
       assert.equal(indexRoot.status, 200, '12. GET / still reaches the index-mounted route class, where req.baseUrl is the empty string');
       assert.equal(indexRoot.body, '{"data":"INDEX-ROOT-RAN"}', '12. and it reaches its own handler');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // abofs/stonyx-rest-server#56 - percent-encoded request target
+  //
+  // THE INSTRUMENT, AND THE PROPERTY IT WAS CHOSEN FOR. These probes are issued
+  // over a raw TCP socket, and -- unlike the #54 module above -- that is NOT
+  // because `fetch` would manufacture a green. Measured, and it splits the
+  // inherited rule rather than repeating it:
+  //
+  //   target /enc/%73ecret      fetch -> transmitted VERBATIM   raw -> verbatim
+  //   target /enc/./%73ecret    fetch -> server sees "/enc/%73ecret"   raw -> verbatim
+  //   target http://HOST/enc/x  fetch -> cannot be emitted at all
+  //
+  // `fetch` normalises DOT-SEGMENTS and REQUEST-TARGET FORM. It does not touch
+  // percent-triplets, so it reproduces this defect at 200 against unfixed code
+  // and assertion 0 below is deliberately issued with it. What the raw socket
+  // buys here is narrower and is worth naming precisely, because "raw socket
+  // per the brief" is how an over-broad rule propagates:
+  //
+  //   (a) every target in this module reaches the server as the exact byte
+  //       sequence written in the source, so a reader can paste it into a
+  //       socket and reproduce the measurement; and
+  //   (b) assertion 4's deep-equal compares the rejection's header set against
+  //       a genuine miss's, and both sides must come from ONE instrument for
+  //       the comparison to mean anything.
+  //
+  // Pre-fix reproduction, measured by raw socket on this branch before the
+  // src change, with these same fixtures:
+  //
+  //   GET /enc/secret        -> 401  (hook fires)
+  //   GET /enc/%73ecret      -> 200  {"data":"GUARDED-PARAM-HANDLER-RAN","id":"secret",...}
+  //   GET /enco/%73ecret     -> 200  {"data":"GUARDED-PARAM-HANDLER-RAN","id":"secret",...}
+  //   GET /private/%66ailure -> 200  {"data":"param-route"}   (guard walked past)
+  // ---------------------------------------------------------------------------
+  module('percent-encoded request target (#56)', function() {
+    // DEFECT TEST. Scaffolded as a QUnit `todo` in the commit before the fix
+    // and measured red there: 15 failing assertions, output in the PR body.
+    // Flipped to `test` in the fix commit, which is forced rather than
+    // remembered -- QUnit reports a `todo` whose assertions all pass as a
+    // FAILURE, so the marker cannot survive the fix.
+    test('AC1 - the percent-encoding bypass is closed on both hook shapes', async function(assert) {
+      const { port } = config.restServer;
+
+      // -- 0. the same defect through an ordinary HTTP client -----------------
+      // DEFECT TEST, and the assertion that pins the instrument claim above:
+      // `fetch` transmits `%73` verbatim, so this reproduces the bypass at 200
+      // pre-fix exactly as the raw socket does. It is here so that nobody reads
+      // this module as "raw sockets are required for percent-encoding" -- they
+      // are not, and the two-cell experiment that splits the inherited rule is
+      // recorded in the header comment.
+      const viaFetch = await fetch(`${endpoint}/enc/%73ecret`);
+      assert.equal(viaFetch.status, 404, '0. GET /enc/%73ecret is rejected for an ordinary fetch client too');
+
+      // -- 1. shape A: the hook authorizes on req.path ------------------------
+      const pathHook = await rawRequest('/enc/%73ecret', port);
+      assert.equal(pathHook.status, 404, '1. GET /enc/%73ecret is rejected (hook on req.path)');
+      assert.notOk(pathHook.body.includes('GUARDED-PARAM-HANDLER-RAN'), '1. GET /enc/%73ecret does not return the guarded handler body');
+
+      // -- 2. shape B: the hook authorizes on the query-stripped originalUrl --
+      const originalUrlHook = await rawRequest('/enco/%73ecret', port);
+      assert.equal(originalUrlHook.status, 404, '2. GET /enco/%73ecret is rejected (hook on the query-stripped req.originalUrl)');
+      assert.notOk(originalUrlHook.body.includes('GUARDED-PARAM-HANDLER-RAN'), '2. GET /enco/%73ecret does not return the guarded handler body');
+
+      // -- 3. the rule is not character-positional ----------------------------
+      // Three SAMPLES, deliberately not an enumeration. The family is
+      // `PROD(1 + v_i) - 1` spellings for an id of n bytes, where v_i is 2 when
+      // the byte's hex carries a letter digit and 1 otherwise -- measured 63
+      // spellings for `secret` and 71 for `admin`, ALL of them 200 pre-fix. An
+      // AC enumerating spellings is the wrong shape; these three exist so a fix
+      // anchored on a LEADING `%`, on an exact string, or on a single triplet
+      // turns red.
+      const middle = await rawRequest('/enc/sec%72et', port);
+      assert.equal(middle.status, 404, '3. GET /enc/sec%72et is rejected (encoded byte in the MIDDLE)');
+
+      const last = await rawRequest('/enc/secre%74', port);
+      assert.equal(last.status, 404, '3. GET /enc/secre%74 is rejected (encoded byte LAST)');
+
+      const all = await rawRequest('/enc/%73%65%63%72%65%74', port);
+      assert.equal(all.status, 404, '3. GET /enc/%73%65%63%72%65%74 is rejected (EVERY byte encoded)');
+      assert.notOk(all.body.includes('GUARDED-PARAM-HANDLER-RAN'), '3. the fully-encoded spelling does not return the guarded handler body');
+
+      const upperHex = await rawRequest('/enc/%53ecret', port);
+      assert.equal(upperHex.status, 404, '3. GET /enc/%53ecret is rejected (uppercase octet -- a DIFFERENT id, still an over-encoded unreserved byte)');
+
+      // -- 4. no oracle -------------------------------------------------------
+      // A rejection must be shape-identical to a genuine miss, for the same
+      // reason as #54's AC1.5: `res.sendStatus(404)` answers `text/plain` while
+      // a real miss answers `text/html` with a CSP header -- a working oracle
+      // telling an attacker the route exists but was spelled wrong. This is
+      // what pins `next('router')`. Content-Length is excluded because the two
+      // bodies echo different targets.
+      //
+      // `/enc/genuinely/missing` is TWO segments, so it matches neither `/:id`
+      // nor anything else in the class and is a true miss.
+      const genuineMiss = await rawRequest('/enc/genuinely/missing', port);
+      assert.equal(genuineMiss.status, 404, '4. precondition: a genuine miss under /enc is a 404');
+      assert.deepEqual(shapeOf(pathHook), shapeOf(genuineMiss), '4. the rejection is indistinguishable from a genuine miss (status, content-type, CSP, nosniff)');
+      assert.deepEqual(shapeOf(originalUrlHook), shapeOf(genuineMiss), '4. and so is the originalUrl-shape rejection');
+
+      // -- 5. the third shape, in the SHIPPED fixture -------------------------
+      // `private.ts` guards a LITERAL route on `req.path` and co-registers
+      // `/:id`. The encoded spelling misses the literal layer and is ABSORBED
+      // by the sibling param route, so the guard is walked past without the
+      // guarded handler ever being the one that runs. Measured pre-fix:
+      // `GET /private/failure` -> 505 while `GET /private/%66ailure` -> 200
+      // {"data":"param-route"}. This is the shape most likely to exist in the
+      // field, and no fixture written for #56 alone would have caught it.
+      const encodedLiteralGuarded = await rawRequest('/private/%66ailure', port);
+      assert.equal(encodedLiteralGuarded.status, 404, '5. GET /private/%66ailure is rejected rather than absorbed by the sibling /:id route');
+      assert.notOk(encodedLiteralGuarded.body.includes('param-route'), '5. GET /private/%66ailure does not reach the /:id catch-all');
+
+      const encodedLiteralOpen = await rawRequest('/private/%73uccess', port);
+      assert.equal(encodedLiteralOpen.status, 404, '5. GET /private/%73uccess is rejected too -- the rule is about the SPELLING, not about which handler it would have reached');
+
+      // -- 6. the check runs BEFORE the auth hook, not merely outside it ------
+      // GUARD, not a defect test: pre-fix this target answered 403, which is a
+      // DENY, so nothing was open here. It exists because "outside
+      // `if (this.auth)`" and "before it" are two separate properties and #55's
+      // fix round found the second one uncovered.
+      //
+      // This is the only probe in the repo where the rule and a consumer hook
+      // both fire on the same request, and it works because `private.ts`'s hook
+      // has two clauses reading two different fields: `req.path === '/failure'`
+      // (raw, so the encoded spelling walks past it) and
+      // `req.params?.id === 'restricted'` (DECODED by express, so the encoded
+      // spelling still trips it). Move
+      // `if (shouldRejectEncoding(req)) return next('router')` below the
+      // `if (this.auth)` block and this answers 403 -- the consumer's own hook
+      // status, on a request the module was about to reject, which is the same
+      // oracle class #54's AC1.5 exists to prevent and additionally runs any
+      // side effect the hook has.
+      const encodedParamDenied = await rawRequest('/private/restricte%64', port);
+      assert.equal(encodedParamDenied.status, 404, '6. GET /private/restricte%64 is rejected by the module, not answered with the auth hook status');
+      assert.deepEqual(shapeOf(encodedParamDenied), shapeOf(genuineMiss), '6. and that rejection is still shape-identical to a genuine miss');
+
+      const canonicalParamDenied = await rawRequest('/private/restricted', port);
+      assert.equal(canonicalParamDenied.status, 403, '6. precondition: the same hook still answers 403 on the CANONICAL spelling, so the 404 above is the check and not a dead route');
+    });
+
+    test('AC2 - negative controls: the fix is not satisfiable by breaking routing', async function(assert) {
+      const { port } = config.restServer;
+
+      // GUARD, not a defect test. Killed by mutation D (`shouldRejectEncoding`
+      // -> `return true`), measured at 13 pass / 21 fail with every surface
+      // below among the failures.
+
+      // 1. the canonical spelling is still denied, on both hook shapes.
+      const canonicalPathHook = await rawRequest('/enc/secret', port);
+      assert.equal(canonicalPathHook.status, 401, '1. GET /enc/secret still reaches the req.path hook and is denied');
+
+      const canonicalOriginalUrlHook = await rawRequest('/enco/secret', port);
+      assert.equal(canonicalOriginalUrlHook.status, 401, '1. GET /enco/secret still reaches the req.originalUrl hook and is denied');
+
+      // 2. an unguarded param still routes, and the handler still receives the
+      // DECODED value -- status alone would not show that.
+      const unguarded = await rawRequest('/enc/open', port);
+      assert.equal(unguarded.status, 200, '2. GET /enc/open still routes to the param handler');
+      assert.deepEqual(JSON.parse(unguarded.body).id, 'open', '2. and the handler receives req.params.id === "open"');
+
+      // 3. the shipped hooks are unchanged.
+      const privateFailure = await rawRequest('/private/failure', port);
+      assert.equal(privateFailure.status, 505, '3. GET /private/failure still answers with the auth hook status');
+
+      const privateRestricted = await rawRequest('/private/restricted', port);
+      assert.equal(privateRestricted.status, 403, '3. GET /private/restricted still answers 403 from the req.params.id clause of the same hook');
+
+      // 4. #54's ACs still hold -- this fix is additive, not a replacement.
+      const adminRoot = await rawRequest('/admin', port);
+      assert.equal(adminRoot.status, 401, '4. GET /admin still reaches the auth hook and is denied');
+
+      const adminSettings = await rawRequest('/admin/settings', port);
+      assert.equal(adminSettings.status, 401, '4. GET /admin/settings still reaches the auth hook and is denied');
+
+      const adminLegacy = await rawRequest('/admin/legacy/', port);
+      assert.equal(adminLegacy.status, 200, '4. a route registered with a literal trailing slash still matches at its registered spelling');
+
+      const applicationRoot = await rawRequest('/', port);
+      assert.equal(applicationRoot.status, 200, '4. GET / still reaches the index-mounted route class');
+
+      // 5. THE BREAKING CHANGE, asserted rather than only documented. This is
+      // the fourth entry in the README's behaviour-change list and the only
+      // shipped-fixture route whose status this fix moves: an over-encoded
+      // unreserved byte in a param value used to route. Measured 200 before,
+      // 404 after. It is asserted HERE, among the negative controls, so that
+      // the cost of the fix is a committed number rather than a prose claim --
+      // and so that anyone who later decides the cost is too high has to edit
+      // an assertion rather than quietly relax the rule.
+      const overEncodedParam = await rawRequest('/public/url-params/%61/b/c', port);
+      assert.equal(overEncodedParam.status, 404, '5. BREAKING: GET /public/url-params/%61/b/c is now rejected (was 200) -- opt out with REST_CANONICAL_ENCODING=false');
+
+      const canonicalParams = await rawRequest('/public/url-params/foo/bar/baz', port);
+      assert.equal(canonicalParams.status, 200, '5. and the canonical spelling of the same route is untouched');
+    });
+
+    test('AC3 - false-deny control: reserved characters stay encodable', async function(assert) {
+      const { port } = config.restServer;
+
+      // GUARD against the fix's own hazard, and the assertion that rejects the
+      // obvious wrong implementation. RFC 3986 requires a client to
+      // percent-encode a RESERVED character it means literally, so rejecting
+      // every triplet -- or comparing `decodeURIComponent(target)` against
+      // `target` -- turns a legitimate request into a 404.
+      //
+      // Killed by mutation A (`decodeURIComponent(target) !== target` in place
+      // of the unreserved-octet scan): measured `/enc/sec%2fret` -> 404.
+      //
+      // The router SPLITS then DECODES, so `sec%2fret` is ONE segment naming
+      // the distinct id `sec/ret`. A consumer hook that decodes then splits
+      // gets this wrong in the other direction -- that is why the sound
+      // comparison is `req.params` and not any decoded path string.
+      const encodedSlash = await rawRequest('/enc/sec%2fret', port);
+      assert.equal(encodedSlash.status, 200, '1. GET /enc/sec%2fret is allowed -- %2f is a RESERVED character and must stay encodable');
+      assert.deepEqual(JSON.parse(encodedSlash.body).id, 'sec/ret', '1. and the handler receives the decoded id "sec/ret"');
+
+      const encodedSlashUpperHex = await rawRequest('/enc/sec%2Fret', port);
+      assert.equal(encodedSlashUpperHex.status, 200, '1. GET /enc/sec%2Fret is allowed too -- hex-digit case does not change the octet');
+      assert.deepEqual(JSON.parse(encodedSlashUpperHex.body).id, 'sec/ret', '1. and it names the SAME id, which is the residual #56 cannot close');
+
+      const encodedPlus = await rawRequest('/enc/a%2Bb', port);
+      assert.equal(encodedPlus.status, 200, '2. GET /enc/a%2Bb is allowed -- %2B is a RESERVED character and must stay encodable');
+      assert.deepEqual(JSON.parse(encodedPlus.body).id, 'a+b', '2. and the handler receives the decoded id "a+b"');
+
+      // 3. The QUERY STRING is stripped before the scan, not scanned. A query
+      // string is a legitimately variable part of a request target and may
+      // carry any encoding at all -- `?name=%61` is an ordinary request and
+      // 404ing it would break every consumer that sends one. This is the
+      // assertion that kills the `.split('?')[0]` removal; #54's own assertion
+      // 2/8 pair cannot, because its targets are non-canonical either way.
+      const encodedQuery = await rawRequest('/enc/x?name=%61', port);
+      assert.equal(encodedQuery.status, 200, '3. GET /enc/x?name=%61 is allowed -- the query string is stripped before the scan');
+      assert.deepEqual(JSON.parse(encodedQuery.body).id, 'x', '3. and the request reaches the param handler with id "x"');
+
+      // 4. Malformed and over-long escapes are NOT this rule's business, and
+      // the rule must not change what answers them. `router@2.2.0`'s
+      // `decodeParam` (lib/layer.js:225) answers 400 for these DURING matching,
+      // before any handler or hook runs -- measured identical before and after
+      // this change. A 404 here would mean the rule had started answering for
+      // them, which is a behaviour change nobody asked for; a 200 would mean
+      // decoding had been weakened.
+      const malformed = await rawRequest('/enc/%zz', port);
+      assert.equal(malformed.status, 400, '4. GET /enc/%zz still answers 400 from the router decode, not 404 from this rule');
+
+      const truncated = await rawRequest('/enc/%6', port);
+      assert.equal(truncated.status, 400, '4. GET /enc/%6 (truncated triplet) still answers 400 from the router decode');
+
+      const overlong = await rawRequest('/enc/%c1%a1', port);
+      assert.equal(overlong.status, 400, '4. GET /enc/%c1%a1 (over-long UTF-8) still answers 400 from the router decode');
+    });
+
+    test('AC4 - express decodes exactly once, and so does the rule', async function(assert) {
+      const { port } = config.restServer;
+
+      // GUARD against the OTHER wrong implementation: decode until stable.
+      // `%2573ecret` decodes ONCE to the literal id `%73ecret`, which is a
+      // legitimate and DISTINCT record id. A loop-until-stable rule 404s it;
+      // measured on a consumer hook written that way, `/loop/%2573ecret` was
+      // false-denied at 401 while the router had routed to `%73ecret`.
+      //
+      // Killed by mutation A as well (whole-target decode): measured 404.
+      const doubleEncoded = await rawRequest('/enc/%2573ecret', port);
+      assert.equal(doubleEncoded.status, 200, '1. GET /enc/%2573ecret is allowed -- %25 is RESERVED, and one decode yields the distinct id "%73ecret"');
+      assert.deepEqual(JSON.parse(doubleEncoded.body).id, '%73ecret', '1. and the handler receives the singly-decoded id "%73ecret", not "secret"');
+
+      // Precondition making assertion 1 non-vacuous: the id it decodes to is
+      // genuinely a different record from the guarded one, so allowing it is
+      // correct rather than a hole.
+      assert.notDeepEqual(JSON.parse(doubleEncoded.body).id, 'secret', '1. precondition: the singly-decoded id is NOT the guarded id, so this is a distinct record and not a bypass');
     });
   });
 

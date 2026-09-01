@@ -1,4 +1,5 @@
 const {
+  REST_CANONICAL_ENCODING,
   REST_CANONICAL_ROUTES,
   REST_CASE_SENSITIVE_ROUTES,
   REST_CORS_ORIGIN,
@@ -130,6 +131,74 @@ const config = {
   // needs subprocess-based env isolation this repo does not have; any fix must
   // keep a live assertion on this default.
   canonicalRoutes: REST_CANONICAL_ROUTES !== 'false',
+
+  // Secure by default, same polarity and same reasoning as the three keys
+  // above: a request whose RAW target percent-encodes an RFC 3986 2.3
+  // UNRESERVED character (ALPHA / DIGIT / "-" / "." / "_" / "~") is rejected
+  // with a plain 404 before the consumer's `auth` hook runs
+  // (abofs/stonyx-rest-server#56). Like canonicalRoutes this is NOT an express
+  // setting -- it is a per-request check in src/route-matching.ts
+  // (`shouldRejectEncoding`), called from the handler closure in
+  // src/request.ts.
+  //
+  // What it closes: express decodes `req.params` and NOTHING else, so a
+  // consumer hook comparing `req.path` OR `req.originalUrl` was walked past by
+  // re-spelling an id -- `GET /enc/secret` -> 401 while
+  // `GET /enc/%73ecret` -> 200 with the guarded handler running
+  // unauthenticated and `req.params.id === 'secret'`. The spelling family is
+  // PROD(1 + v_i) - 1 per id, measured at 63 spellings for `secret` and 71 for
+  // `admin`, ALL of them 200 before this key existed. It is EXCLUSIVE to route
+  // classes carrying a `:param` segment; literal routes and mount segments
+  // match raw and were never reachable this way.
+  //
+  // BEHAVIOUR CHANGE for consumers upgrading, on a FOURTH axis:
+  //   Any client that over-encodes an unreserved character in a path now gets
+  //   404. Measured on this repo's own fixture:
+  //   `GET /public/url-params/%61/b/c` -> 404 (was 200). Over-encoding an
+  //   unreserved character is never required by RFC 3986 -- a normaliser MUST
+  //   decode these (6.2.2.2) -- so the blast radius is smaller than #54's,
+  //   whose absolute-form vector hits a real deployment shape. It is still a
+  //   breaking change and it is documented as one in the README.
+  //
+  // Opt out with REST_CANONICAL_ENCODING=false only as a temporary remediation
+  // -- it RE-OPENS the bypass. SEPARATE key from REST_CANONICAL_ROUTES on
+  // purpose, and this one is not a symmetry argument but a measurement: with
+  // the rule gated on `canonicalRoutes` instead of its own key,
+  // `REST_CANONICAL_ROUTES=false` returns `GET /enc/%73ecret` to 200 -- and
+  // that flag is exactly what a consumer behind an absolute-form-emitting
+  // forward proxy must set to stay up. Folding the two would hand precisely
+  // those consumers the encoding bypass as the price. Killed by
+  // test/unit/request-test.ts AC5.
+  //
+  // DELIBERATELY NOT PINNED in test/config/environment.ts -- do not "fix" this
+  // as part of abofs/stonyx-rest-server#43. Both halves RE-MEASURED for this
+  // key rather than inferred from the three above, against the 41-test suite
+  // at #56's head:
+  //   (a) invert this line to `=== 'true'` ALONE, unpinned:
+  //       36 pass / 5 fail -- #56's integration AC1 and AC2, unit AC5 and AC6,
+  //       and [Unit] Config AC7. It fails LOUDLY, so there is no false green.
+  //   (b) pin `canonicalEncoding: true` in test/config/environment.ts AND
+  //       invert this line: 40 pass / 1 fail, and the ONE failure is
+  //       [Unit] Config AC7 -- every behavioural assertion goes green because
+  //       the pin supplies the secure value the suite then observes. Measured
+  //       again with test/unit/config-test.ts removed: 40 pass / 0 fail, a
+  //       fully green suite shipping an insecure default. That is the trap, and
+  //       AC7 is the only thing standing between this key and it.
+  //
+  // Conversely, weakening the READ in src/route-matching.ts to `=== true`
+  // reports 40 pass / 1 fail with unit AC6 as the only failure and every
+  // integration assertion green -- the two guard different halves and neither
+  // subsumes the other. Closing #43 for any of the four keys needs the
+  // subprocess-based env isolation this repo does not have; any fix must keep a
+  // live assertion on this default.
+  //
+  // FOUR security-relevant keys now, all defaulting on, all disable-able, none
+  // pinned. Per docs/framework/testing.md the pinned set has to be evaluated as
+  // a SET rather than key by key; [Unit] Config AC7 asserts all four together
+  // for that reason. Whoever takes #43 inherits four keys and this paragraph as
+  // the reason they are unpinned, rather than finding four and assuming
+  // neglect.
+  canonicalEncoding: REST_CANONICAL_ENCODING !== 'false',
 
   enableHealthCheck: REST_HEALTH_CHECK_DISABLE !== 'true',
   origin: REST_CORS_ORIGIN ?? '*',

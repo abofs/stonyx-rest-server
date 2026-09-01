@@ -36,6 +36,46 @@ class RouteMatchingFixtureRequest extends Request {
   };
 }
 
+// SECOND fixture, for abofs/stonyx-rest-server#56 only, and the one place this
+// file deliberately does NOT share a harness.
+//
+// It carries a `/:id` route, and that route is exactly why it cannot be folded
+// into RouteMatchingFixtureRequest above. The percent-encoding bypass is
+// exclusive to route classes with a `:param` segment -- express matches a
+// LITERAL route against the raw, still-encoded path, so `/fixture/%73uccess`
+// misses `/success` and 404s with or without the fix, and a literal-only
+// fixture cannot express the defect at all. But adding `/:id` to the shared
+// fixture ABSORBS #47's probe: `/SUCCESS` would match `/:id` at 200 where AC6
+// asserts 404. Measured, by adding `/:id` to RouteMatchingFixtureRequest:
+// 40 pass / 1 fail, #47's AC6 the only failure.
+//
+// #50's AC3 stays GREEN under that same edit, and the asymmetry is worth
+// stating rather than rounding off: `/:id` is equally strict, so `/success/`
+// misses it too and is still a true 404. Only the CASE axis is absorbed by a
+// param route. An earlier draft of this comment claimed both went red; it was
+// wrong, and it was the measurement rather than the reading that caught it.
+//
+// So the two fixtures are separate for a measured, stated reason rather than by
+// drift, and the thing they must not do -- keep two copies of the same probe --
+// they do not: this class is probed only by the #56 module below.
+class EncodingFixtureRequest extends Request {
+  handlers: RouteHandlers = {
+    get: {
+      // The mount ROOT, needed so AC5 can assert -- in the same config state --
+      // that #54's own vector is genuinely re-opened. Without it, an
+      // implementation that ignores `canonicalRoutes` entirely passes AC5
+      // vacuously.
+      '/': (_request: ExpressRequest, _state: Record<string, unknown>) => {
+        return { data: 'root' };
+      },
+
+      '/:id': (_request: ExpressRequest, _state: Record<string, unknown>) => {
+        return { data: 'param' };
+      }
+    }
+  };
+}
+
 // Boots the fixture's own express instance on port 0, issues one request, and
 // always closes the listener. listen(0) so the suite adds no fixed-port bind.
 async function statusFor(path: string): Promise<number> {
@@ -73,8 +113,8 @@ async function statusFor(path: string): Promise<number> {
 // use a socket). Verified by this AC's own opted-out assertion: with
 // canonicalRoutes=false the same fetch call returns 200, so the slash is
 // demonstrably reaching the server.
-async function mountedStatusFor(path: string): Promise<number> {
-  const instance = new RouteMatchingFixtureRequest();
+async function mountedStatusFor(path: string, Fixture: new () => Request = RouteMatchingFixtureRequest): Promise<number> {
+  const instance = new Fixture();
   instance.registerCalls();
 
   const parent = express();
@@ -106,7 +146,7 @@ async function mountedStatusFor(path: string): Promise<number> {
 // -- the one a `!== false` guard has to survive -- is unreachable through
 // sinon, and the restore has to put back the prior own-property state rather
 // than a value.
-function ownStateTracker(key: 'caseSensitiveRoutes' | 'strictRoutes' | 'canonicalRoutes') {
+function ownStateTracker(key: 'caseSensitiveRoutes' | 'strictRoutes' | 'canonicalRoutes' | 'canonicalEncoding') {
   const { restServer } = config;
   let hadOwnProperty = false;
   let originalValue: boolean | undefined;
@@ -337,6 +377,107 @@ module('[Unit] Request', function() {
       restServer.canonicalRoutes = false;
       assert.equal(await mountedStatusFor('/fixture/'), 200, '6. canonicalRoutes=false re-opens the mount-root slash');
       assert.equal(await mountedStatusFor('/fixture'), 200, '7. the canonical target still works when opted out');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // abofs/stonyx-rest-server#56 - canonicalEncoding opt-out flag
+  //
+  // Real HTTP over a real socket on an ephemeral port (listen(0)), against the
+  // MOUNTED EncodingFixtureRequest -- see that class for why the shared fixture
+  // cannot carry the `/:id` route these probes need.
+  //
+  // INSTRUMENT: `fetch`, deliberately and sufficiently. Measured, and this is
+  // the cell that splits the rule six briefs inherited: `fetch` transmits
+  // percent-triplets VERBATIM (`fetch('/enc/%73ecret')` reproduced the bypass
+  // at 200 against unfixed code, exactly as a raw socket did). What `fetch`
+  // normalises is DOT-SEGMENTS and REQUEST-TARGET FORM -- `fetch('/enc/./%73ecret')`
+  // arrives as `/enc/%73ecret` while a raw socket delivers the dot-segment, and
+  // an absolute-form target cannot be emitted through it at all. Neither
+  // appears in this module, so adding a raw-socket harness here would be
+  // ritual, not rigour.
+  //
+  // This module is NOT redundant with the integration ACs, for the same
+  // measured reason #54's AC2 is not: the shipped default is `true`, so a
+  // fail-open guard (`=== true` instead of `!== false`) leaves every
+  // integration assertion green. This is the only tier that can see that
+  // mutant, and AC6 below probes BOTH failure shapes because a guard failing
+  // open only on absent-own-property survives a present-and-`undefined`
+  // assertion -- measured for the sibling keys at 31 pass / 0 fail.
+  // ---------------------------------------------------------------------------
+  module('canonicalEncoding config flag (#56)', function(hooks) {
+    const { restServer } = config;
+    const encodingTracker = ownStateTracker('canonicalEncoding');
+    const canonicalTracker = ownStateTracker('canonicalRoutes');
+
+    hooks.beforeEach(function() {
+      encodingTracker.capture();
+      canonicalTracker.capture();
+    });
+
+    hooks.afterEach(function() {
+      encodingTracker.restore();
+      canonicalTracker.restore();
+    });
+
+    test('AC5 - the key is independent of canonicalRoutes (#54)', async function(assert) {
+      // GUARD. Killed by mutation C -- the rule implemented correctly but read
+      // through `config.restServer?.canonicalRoutes` instead of its own key.
+      // Measured under that mutation: assertion 1 below returns 200.
+      //
+      // The independence is not a tidiness preference. A consumer behind an
+      // absolute-form-emitting forward proxy MUST set
+      // `REST_CANONICAL_ROUTES=false` to stay up; folding the two keys would
+      // hand exactly those consumers the encoding bypass as the price.
+      restServer.canonicalRoutes = false;
+
+      assert.equal(await mountedStatusFor('/fixture/%73ecret', EncodingFixtureRequest), 404, '1. the encoded spelling is STILL rejected with canonicalRoutes=false');
+
+      // 2. ...and in that SAME state, #54's own vector is genuinely re-opened.
+      // Without this assertion, an implementation that ignores
+      // `canonicalRoutes` entirely -- or a test harness whose flag write never
+      // reached the server -- also passes assertion 1, and assertion 1 is then
+      // vacuous. This is the precondition that makes the independence claim
+      // mean something.
+      assert.equal(await mountedStatusFor('/fixture/', EncodingFixtureRequest), 200, '2. precondition: canonicalRoutes=false DID take effect -- the #54 mount-root vector is re-opened in this same state');
+
+      // 3. and the canonical spelling still routes, so assertion 1 is a
+      // rejection of the SPELLING rather than of the route.
+      assert.equal(await mountedStatusFor('/fixture/secret', EncodingFixtureRequest), 200, '3. the canonical spelling still routes with canonicalRoutes=false');
+    });
+
+    test('AC6 - the absent-key default is secure, and the opt-out opts out', async function(assert) {
+      // GUARD. Killed by weakening the read in src/route-matching.ts from
+      // `!== false` to `=== true`: measured 38 pass / 1 fail with THIS test as
+      // the only failure, which is also the evidence that the integration tier
+      // cannot see it.
+
+      // 1. Sanity: the canonical spelling is reachable with the config
+      // untouched, and the encoded one is not.
+      assert.equal(await mountedStatusFor('/fixture/secret', EncodingFixtureRequest), 200, '1. GET /fixture/secret is 200 with the config untouched');
+      assert.equal(await mountedStatusFor('/fixture/%73ecret', EncodingFixtureRequest), 404, '1. GET /fixture/%73ecret is rejected with the config untouched');
+
+      // 2. Key PRESENT and `undefined`.
+      restServer.canonicalEncoding = undefined;
+      assert.equal(await mountedStatusFor('/fixture/%73ecret', EncodingFixtureRequest), 404, '2. defaults to rejecting the encoded spelling when the key is present and undefined');
+
+      // 3/4. Key ABSENT as an own property -- the state every consumer whose
+      // shipped `restServer` block predates this key is in, and reachable in
+      // practice because the stonyx loader only merges a module's
+      // config/environment.js for modules in devDependencies. Strictly stronger
+      // than 2: a guard failing open only on this shape survives 2.
+      delete restServer.canonicalEncoding;
+      assert.notOk(Object.prototype.hasOwnProperty.call(restServer, 'canonicalEncoding'), '3. precondition: canonicalEncoding is not an own property');
+      assert.equal(await mountedStatusFor('/fixture/%73ecret', EncodingFixtureRequest), 404, '4. defaults to rejecting the encoded spelling when the key is absent entirely');
+      assert.equal(await mountedStatusFor('/fixture/secret', EncodingFixtureRequest), 200, '4. and the canonical spelling still routes in that state');
+
+      // 5/6. Explicit opt-out genuinely re-opens the bypass. This is also what
+      // proves 2 and 4 are not vacuous: the same fetch call returns 200 here,
+      // so `%73ecret` is demonstrably reaching the server rather than being
+      // swallowed or normalised by the client.
+      restServer.canonicalEncoding = false;
+      assert.equal(await mountedStatusFor('/fixture/%73ecret', EncodingFixtureRequest), 200, '5. canonicalEncoding=false re-opens the percent-encoding bypass');
+      assert.equal(await mountedStatusFor('/fixture/secret', EncodingFixtureRequest), 200, '6. the canonical spelling still routes when opted out');
     });
   });
 });
