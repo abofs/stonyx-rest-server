@@ -79,13 +79,14 @@ import config from 'stonyx/config';
  * guarded handler running unauthenticated. `GET /public/` now returns 404, and
  * the integration AC asserts exactly that.
  *
- * Both guards are `!== false` for the same reason: these flags default to the
+ * All four guards in this file are `!== false` for the same reason: these flags
+ * default to the
  * truthy direction, so a truthy check fails OPEN for a consumer whose shipped
- * config predates the key. Both are also asserted at the unit tier for BOTH
+ * config predates the key. All are also asserted at the unit tier for BOTH
  * failure shapes -- key present-and-`undefined` and key absent as an own
- * property -- in `test/unit/request-test.ts` (#47's AC6, #50's AC3). The
- * integration tier cannot see either: with the shipped default `true`, a
- * fail-open guard leaves every integration assertion green.
+ * property -- in `test/unit/request-test.ts` (#47's AC6, #50's AC3, #54's AC2,
+ * #56's AC6). The integration tier cannot see any of them: with the shipped
+ * default `true`, a fail-open guard leaves every integration assertion green.
  */
 export default function applyRouteMatching(api: Express): void {
   if (config.restServer?.caseSensitiveRoutes !== false) api.set('case sensitive routing', true);
@@ -132,7 +133,7 @@ export default function applyRouteMatching(api: Express): void {
  * are two separate properties with two separate assertions (AC1.11 and AC1.6);
  * see src/request.ts.
  *
- * Guard polarity is `!== false`, matching both siblings, for the same measured
+ * Guard polarity is `!== false`, matching its three siblings, for the same measured
  * reason: the secure value is the TRUTHY one, so a plain truthy check fails
  * OPEN for any consumer whose shipped `restServer` block predates the key --
  * the state every existing consumer is in, and reachable in practice because

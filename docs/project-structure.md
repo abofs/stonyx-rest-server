@@ -314,7 +314,8 @@ had a guard: shipped `GET /` → 200, conjunct dropped → 404, suite
 **34 pass / 0 fail both ways**. Killed by AC1.12, against
 `test/sample/requests/index.ts`.
 
-**Timing contract — deliberately the opposite of its two siblings.**
+**Timing contract — deliberately the opposite of the two settings, and shared
+with `shouldRejectEncoding()` (#56).**
 `caseSensitiveRoutes` and `strictRoutes` are read once in a **constructor** and
 are silently ineffective if applied late, because express materializes a router
 lazily on first route registration. `canonicalRoutes` is read **per request**,
