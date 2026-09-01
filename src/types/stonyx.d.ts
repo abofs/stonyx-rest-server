@@ -6,6 +6,7 @@ declare module 'stonyx/config' {
     caseSensitiveRoutes?: boolean;
     strictRoutes?: boolean;
     canonicalRoutes?: boolean;
+    canonicalEncoding?: boolean;
     enableHealthCheck?: boolean;
     origin?: string | string[];
     methods?: string[];

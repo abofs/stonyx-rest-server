@@ -1,7 +1,7 @@
 import express, { type Request as ExpressRequest, type Response as ExpressResponse, type NextFunction, type Express } from 'express';
 import config from 'stonyx/config';
 import { makeArray } from '@stonyx/utils/object';
-import applyRouteMatching, { shouldRejectTarget } from './route-matching.js';
+import applyRouteMatching, { shouldRejectEncoding, shouldRejectTarget } from './route-matching.js';
 
 const METHODS = new Set(['get', 'post', 'put', 'delete', 'patch']);
 
@@ -113,6 +113,32 @@ export default class Request {
           // asserted to have "its own red-able assertion". It did not: only
           // half of it was covered. Do not re-merge them.
           if (shouldRejectTarget(req)) return next('router');
+
+          // abofs/stonyx-rest-server#56 -- reject a request whose RAW target
+          // spells an UNRESERVED character (RFC 3986 2.3) as a percent-triplet,
+          // closing the authorization bypass against a hook that compares
+          // `req.path` OR `req.originalUrl` on any route class with a `:param`
+          // segment. Express decodes only `req.params`, so both raw fields see
+          // `%73ecret` while the handler is given `secret`.
+          //
+          // A SEPARATE line and a SEPARATE predicate from #54's above, and it
+          // must stay that way. Extending shouldRejectTarget()'s comparison
+          // cannot reach this: `target === canonical` for EVERY one of these
+          // spellings, because both sides carry the same encoded string.
+          // Reading #54's key here is worse than useless -- measured, gating
+          // this rule on `canonicalRoutes` returns `GET /enc/%73ecret` to 200
+          // under `REST_CANONICAL_ROUTES=false`, which is exactly the flag an
+          // absolute-form-proxy consumer must set. Killed by
+          // `test/unit/request-test.ts` AC5.
+          //
+          // The same three load-bearing properties as the line above apply
+          // verbatim -- outside `if (this.auth)`, BEFORE it, and rejecting with
+          // `next('router')` rather than a sendStatus that answers `text/plain`
+          // and becomes an oracle. They are killed here by
+          // `test/integration/rest-server-test.ts` #56 AC1.4 (the shape
+          // deep-equal against a genuine miss) and AC1.5 (`/private/%66ailure`
+          // -> 404 rather than the hook's own status), on a class WITH a hook.
+          if (shouldRejectEncoding(req)) return next('router');
 
           // Run auth after route matching so request.params is populated
           if (this.auth) {

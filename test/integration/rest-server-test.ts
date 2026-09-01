@@ -576,13 +576,12 @@ module('[Integration] Rest Server', function(hooks) {
   //   GET /private/%66ailure -> 200  {"data":"param-route"}   (guard walked past)
   // ---------------------------------------------------------------------------
   module('percent-encoded request target (#56)', function() {
-    // SCAFFOLDED AS `todo`: these assertions are DEFECT TESTS and they fail
-    // against unfixed code by design. QUnit reports a `todo` whose assertions
-    // fail as passing, and reports it as FAILING once they all pass -- so this
-    // marker cannot survive the fix, and flipping it to `test()` is part of the
-    // fix commit rather than a step someone can forget. Measured red here:
-    // 15 failing assertions, output in the PR body.
-    todo('AC1 - the percent-encoding bypass is closed on both hook shapes', async function(assert) {
+    // DEFECT TEST. Scaffolded as a QUnit `todo` in the commit before the fix
+    // and measured red there: 15 failing assertions, output in the PR body.
+    // Flipped to `test` in the fix commit, which is forced rather than
+    // remembered -- QUnit reports a `todo` whose assertions all pass as a
+    // FAILURE, so the marker cannot survive the fix.
+    test('AC1 - the percent-encoding bypass is closed on both hook shapes', async function(assert) {
       const { port } = config.restServer;
 
       // -- 0. the same defect through an ordinary HTTP client -----------------
@@ -696,6 +695,20 @@ module('[Integration] Rest Server', function(hooks) {
 
       const applicationRoot = await rawRequest('/', port);
       assert.equal(applicationRoot.status, 200, '4. GET / still reaches the index-mounted route class');
+
+      // 5. THE BREAKING CHANGE, asserted rather than only documented. This is
+      // the fourth entry in the README's behaviour-change list and the only
+      // shipped-fixture route whose status this fix moves: an over-encoded
+      // unreserved byte in a param value used to route. Measured 200 before,
+      // 404 after. It is asserted HERE, among the negative controls, so that
+      // the cost of the fix is a committed number rather than a prose claim --
+      // and so that anyone who later decides the cost is too high has to edit
+      // an assertion rather than quietly relax the rule.
+      const overEncodedParam = await rawRequest('/public/url-params/%61/b/c', port);
+      assert.equal(overEncodedParam.status, 404, '5. BREAKING: GET /public/url-params/%61/b/c is now rejected (was 200) -- opt out with REST_CANONICAL_ENCODING=false');
+
+      const canonicalParams = await rawRequest('/public/url-params/foo/bar/baz', port);
+      assert.equal(canonicalParams.status, 200, '5. and the canonical spelling of the same route is untouched');
     });
 
     test('AC3 - false-deny control: reserved characters stay encodable', async function(assert) {
@@ -725,6 +738,32 @@ module('[Integration] Rest Server', function(hooks) {
       const encodedPlus = await rawRequest('/enc/a%2Bb', port);
       assert.equal(encodedPlus.status, 200, '2. GET /enc/a%2Bb is allowed -- %2B is a RESERVED character and must stay encodable');
       assert.deepEqual(JSON.parse(encodedPlus.body).id, 'a+b', '2. and the handler receives the decoded id "a+b"');
+
+      // 3. The QUERY STRING is stripped before the scan, not scanned. A query
+      // string is a legitimately variable part of a request target and may
+      // carry any encoding at all -- `?name=%61` is an ordinary request and
+      // 404ing it would break every consumer that sends one. This is the
+      // assertion that kills the `.split('?')[0]` removal; #54's own assertion
+      // 2/8 pair cannot, because its targets are non-canonical either way.
+      const encodedQuery = await rawRequest('/enc/x?name=%61', port);
+      assert.equal(encodedQuery.status, 200, '3. GET /enc/x?name=%61 is allowed -- the query string is stripped before the scan');
+      assert.deepEqual(JSON.parse(encodedQuery.body).id, 'x', '3. and the request reaches the param handler with id "x"');
+
+      // 4. Malformed and over-long escapes are NOT this rule's business, and
+      // the rule must not change what answers them. `router@2.2.0`'s
+      // `decodeParam` (lib/layer.js:225) answers 400 for these DURING matching,
+      // before any handler or hook runs -- measured identical before and after
+      // this change. A 404 here would mean the rule had started answering for
+      // them, which is a behaviour change nobody asked for; a 200 would mean
+      // decoding had been weakened.
+      const malformed = await rawRequest('/enc/%zz', port);
+      assert.equal(malformed.status, 400, '4. GET /enc/%zz still answers 400 from the router decode, not 404 from this rule');
+
+      const truncated = await rawRequest('/enc/%6', port);
+      assert.equal(truncated.status, 400, '4. GET /enc/%6 (truncated triplet) still answers 400 from the router decode');
+
+      const overlong = await rawRequest('/enc/%c1%a1', port);
+      assert.equal(overlong.status, 400, '4. GET /enc/%c1%a1 (over-long UTF-8) still answers 400 from the router decode');
     });
 
     test('AC4 - express decodes exactly once, and so does the rule', async function(assert) {

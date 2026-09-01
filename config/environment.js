@@ -1,4 +1,5 @@
 const {
+  REST_CANONICAL_ENCODING,
   REST_CANONICAL_ROUTES,
   REST_CASE_SENSITIVE_ROUTES,
   REST_CORS_ORIGIN,
@@ -130,6 +131,9 @@ const config = {
   // needs subprocess-based env isolation this repo does not have; any fix must
   // keep a live assertion on this default.
   canonicalRoutes: REST_CANONICAL_ROUTES !== 'false',
+
+  // PLACEHOLDER-56-COMMENT
+  canonicalEncoding: REST_CANONICAL_ENCODING !== 'false',
 
   enableHealthCheck: REST_HEALTH_CHECK_DISABLE !== 'true',
   origin: REST_CORS_ORIGIN ?? '*',

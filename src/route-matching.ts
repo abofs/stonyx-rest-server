@@ -171,3 +171,123 @@ export function shouldRejectTarget(req: ExpressRequest): boolean {
 
   return target !== canonical;
 }
+
+// RFC 3986 §2.3 UNRESERVED = ALPHA / DIGIT / "-" / "." / "_" / "~".
+//
+// These are the characters a URI generator MUST NOT percent-encode and that a
+// normaliser MUST decode (§6.2.2.2), so an encoded one carries no information
+// a client is ever required to send. Everything else -- every RESERVED
+// character and every non-ASCII octet -- stays encodable, which is the whole
+// reason this is an allowlist of octets rather than a ban on triplets. See
+// `shouldRejectEncoding()` below.
+const UNRESERVED_OCTET = /^[A-Za-z0-9\-._~]$/;
+
+// A percent-triplet: `%` followed by exactly two hex digits, either case.
+//
+// A `%` can never be part of ANOTHER triplet's hex digits, because `%` is not a
+// hex digit -- so scanning left to right without skipping cannot produce an
+// overlapping false match. `%2561` therefore yields exactly one candidate
+// (`%25`), which is the property AC4 pins.
+//
+// Malformed and over-long escapes (`%zz`, `%`, `%6`, `%c1%a1`, `%e0%81%a1`) are
+// deliberately NOT this function's business: `router@2.2.0`'s `decodeParam`
+// (lib/layer.js:225) answers 400 for them before any handler or hook runs.
+// Verified here rather than imported -- measured 400 both before and after this
+// change. None of those octets is unreserved, and the first three are not valid
+// triplets at all, so the rule does not touch them either way.
+const PERCENT_TRIPLET = /%([0-9A-Fa-f]{2})/g;
+
+/**
+ * Decides whether a request must be rejected because its RAW request target
+ * spells an unreserved character as a percent-triplet
+ * (abofs/stonyx-rest-server#56).
+ *
+ * Closes a live authorization bypass on any route class carrying a `:param`
+ * segment. Express decodes `req.params` and NOTHING else -- `req.path` and
+ * `req.originalUrl` both stay percent-encoded -- so a consumer hook comparing
+ * either of those raw fields was walked past by re-spelling the id:
+ *
+ *   GET /enc/secret     -> 401  (hook fires)
+ *   GET /enc/%73ecret   -> 200  guarded handler, unauthenticated, id "secret"
+ *
+ * Both hook shapes are affected and neither is safer than the other; there is
+ * no spelling that defeats one and not the same-id comparison in the other.
+ * A third shape is worse still: a LITERAL guarded route co-registered with a
+ * sibling `/:id` (this repo's own `test/sample/requests/private.ts`) has the
+ * encoded spelling miss the literal layer and be ABSORBED by the param route,
+ * so the guard is walked past without the guarded handler ever running --
+ * measured `GET /private/failure` -> 505 vs `GET /private/%66ailure` -> 200.
+ *
+ * THE RULE IS AN UNRESERVED-OCTET SCAN, NOT A DECODE-AND-COMPARE. Two wrong
+ * implementations were built and measured, and each breaks a legitimate
+ * request:
+ *
+ *   1. `decodeURIComponent(target) !== target` -- rejects `/enc/sec%2fret`
+ *      (404), which names the DISTINCT id `sec/ret`. The router SPLITS then
+ *      DECODES; a whole-target decode decodes then splits, and the two
+ *      disagree about `%2f` by construction. Killed by AC3.
+ *   2. decode until stable -- rejects `/enc/%2573ecret` (404), which names the
+ *      legitimate id `%73ecret`. Express decodes EXACTLY ONCE, so `%2561` is
+ *      not a bypass and a loop invents a false deny. Killed by AC4.
+ *
+ * WHY THIS IS NOT PART OF `shouldRejectTarget()` (#54), and why extending that
+ * comparison cannot work: for `GET /enc/%73ecret`, `originalUrl` is
+ * `/enc/%73ecret`, `baseUrl` is `/enc` and `path` is `/%73ecret`, so
+ * `target === canonical` -- both sides carry the SAME encoded string. The
+ * comparison is structurally blind to this axis and no change to it can see it.
+ *
+ * WHY IT IS A FOURTH KEY AND NOT A REUSE OF `canonicalRoutes`. Measured with
+ * the rule implemented correctly but gated on #54's key:
+ * `REST_CANONICAL_ROUTES=false` returns `GET /enc/%73ecret` to 200. That flag
+ * is exactly what a consumer behind an absolute-form-emitting forward proxy
+ * must set, so folding the two would hand precisely those consumers the
+ * encoding bypass as the price of staying up. Same argument the block above
+ * makes for why #50 is not a rename of #47. Pinned by
+ * `test/unit/request-test.ts` AC5, which also asserts -- in that same state --
+ * that #54's own vector IS re-opened, so an implementation that simply ignores
+ * `canonicalRoutes` cannot pass it vacuously.
+ *
+ * TIMING CONTRACT: identical to `shouldRejectTarget()` and NOT to the two
+ * settings above. Read per request, inside the handler closure in
+ * `Request.registerCalls()`; there is no lazy-materialisation hazard, so do not
+ * move it into `applyRouteMatching()`. The caller must reject with
+ * `next('router')`, and must run this BEFORE `this.auth` as well as outside
+ * `if (this.auth)` -- see src/request.ts.
+ *
+ * Guard polarity is `!== false`, matching all three siblings, for the same
+ * measured reason: the secure value is the TRUTHY one, so `=== true` fails OPEN
+ * for any consumer whose shipped `restServer` block predates the key. The
+ * integration tier CANNOT see that mutation -- with the shipped default `true`
+ * every integration assertion stays green -- so it is `test/unit/request-test.ts`
+ * AC6 that kills it, probing the key present-and-`undefined` and absent as an
+ * own property separately.
+ *
+ * WHAT THIS DOES NOT CLOSE, stated here rather than left implied. It cannot
+ * give each decoded id exactly one accepted spelling, because reserved
+ * characters must remain encodable: `/enc/a+b` and `/enc/a%2Bb` both name the
+ * id `a+b`, and `/enc/sec%2fret` and `/enc/sec%2Fret` both name `sec/ret`. So a
+ * hook comparing a raw path string REMAINS UNSOUND for any id containing a
+ * reserved character, and `req.params` -- which express decodes, and which is
+ * populated before `auth()` runs -- is the sound idiom. That residual is the
+ * consumer's comparison to own; the module cannot close it without 404ing
+ * encodings clients are required to emit.
+ */
+export function shouldRejectEncoding(req: ExpressRequest): boolean {
+  // `!== false`, not `=== false` and not a truthy check: the polarity is the
+  // load-bearing part and it should read identically to the three guards above.
+  const enforced = config.restServer?.canonicalEncoding !== false;
+  if (!enforced) return false;
+
+  // Raw, unparsed, and only the query string removed -- by string split, for
+  // the same reason #54 gives: parsing would launder the exact string the
+  // consumer's hook is exposed to. The query is stripped because a query string
+  // is a legitimately variable part of a request target and may carry any
+  // encoding at all; `?name=%61` is a normal request and must not 404.
+  const target = req.originalUrl.split('?')[0];
+
+  for (const [, hex] of target.matchAll(PERCENT_TRIPLET)) {
+    if (UNRESERVED_OCTET.test(String.fromCharCode(parseInt(hex!, 16)))) return true;
+  }
+
+  return false;
+}
