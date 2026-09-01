@@ -259,8 +259,12 @@ distinct id.
 *unreserved* octet, which means every octet **outside** `A-Za-z0-9-._~` stays
 encodable — and any such octet whose hex carries a letter digit therefore has
 two accepted spellings, upper- and lower-case hex. **That is every reserved
-character, every non-ASCII byte, and every control octet — not only the
-reserved ones.** Two different raw targets can still name the same record:
+character, every non-ASCII byte, and every control octet whose hex carries a
+letter digit — not only the reserved ones.** It is not the whole complement of
+`A-Za-z0-9-._~`: `%21` and `%40` carry no letter hex digit and alias
+literal-versus-encoded instead, `%00` and `%09` keep exactly one accepted
+spelling and do not alias at all, and `%90` is a 400. Two different raw targets
+can still name the same record:
 
 ```
 GET /enc/a+b                  -> 200  id "a+b"
@@ -284,8 +288,9 @@ ids with a `/` or a `+` in them" is the mistake this paragraph exists to
 prevent.
 
 **So a hook comparing a raw path string is still unsound for any id carrying an
-octet outside `A-Za-z0-9-._~` — reserved characters, non-ASCII bytes and control
-octets alike — and `req.params` is the sound comparison.** `req.params` is
+octet outside `A-Za-z0-9-._~` that keeps more than one accepted spelling —
+reserved characters, non-ASCII bytes and control octets whose hex carries a
+letter digit alike — and `req.params` is the sound comparison.** `req.params` is
 decoded by express and is populated *before* your `auth` hook runs, by design —
 compare that, and none of this applies to you. This module cannot close the
 residual for you without 404ing encodings clients are entitled to send; see

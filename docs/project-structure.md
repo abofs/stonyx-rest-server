@@ -514,9 +514,13 @@ rejects an over-encoded *unreserved* octet, so every octet **outside**
 `A-Za-z0-9-._~` stays encodable and any such octet whose hex carries a letter
 digit has two accepted spellings, upper- and lower-case hex. **The residual is
 therefore every reserved character, every non-ASCII byte and every control
-octet — scoping it to "reserved characters" understates it, and an i18n
-consumer reading the narrow wording concludes it does not apply to them.**
-Measured **after** the fix:
+octet whose hex carries a letter digit — scoping it to "reserved characters"
+understates it, and an i18n consumer reading the narrow wording concludes it
+does not apply to them.** It is not the whole complement of `A-Za-z0-9-._~`
+either: `%21` and `%40` carry no letter hex digit and alias
+literal-versus-encoded rather than by hex case, `%00` and `%09` keep exactly one
+accepted spelling and do not alias at all, and `%90` is a 400. Measured
+**after** the fix:
 
 ```
 GET /enc/a+b                  -> 200  id "a+b"
@@ -541,8 +545,9 @@ non-ASCII octet stays encodable"); this section, `README.md` and
 matched to it.
 
 So **a hook comparing a raw path string remains unsound for any id carrying an
-octet outside `A-Za-z0-9-._~` — reserved characters, non-ASCII bytes and control
-octets alike — and `req.params` is the sound idiom.** `req.params` is
+octet outside `A-Za-z0-9-._~` that keeps more than one accepted spelling —
+reserved characters, non-ASCII bytes and control octets whose hex carries a
+letter digit alike — and `req.params` is the sound idiom.** `req.params` is
 decoded by express and is populated *before* `auth()` runs, by deliberate design
 (`src/request.ts`, *"Run auth after route matching so request.params is
 populated"*), and the existing integration test *Auth hook has access to
@@ -615,27 +620,44 @@ Three properties of it are load-bearing:
   (the mount root, `/public/`, or "by an express setting") on the same line. The
   test pins both directions: assertion 1 replays the scoped patterns against all
   8 retired claims quoted from `origin/dev`, so narrowing cannot disarm the ban;
-  assertion 2 asserts four honest disclosures are *not* matched.
+  assertion 2 asserts the **seven** honest disclosures the list now carries are
+  *not* matched — by the whole ban, stale-claim patterns and false-closure
+  patterns together, so neither half can be disarmed silently.
 
-  **#56 turned that principle back on this file.** Two of the four "honest
-  disclosures" it carried were honest only while #56 was *open*: a sentence
-  saying the percent-encoding axis is unclosed on a param-segment route class is
-  a stale claim the moment the fix ships. (Not quoted here — quoting it would
-  plant the very string the ledger greps for.) They were **retired into the
-  claim list rather than deleted**, and the honest-disclosure list was
-  re-pointed at the residual that
-  actually remains (reserved characters, multiple spellings, `req.params` as the
-  sound comparison). A ledger whose honest-disclosure fixtures are never revisited
-  becomes a ledger that certifies last quarter's truth.
+  **#56 turned that principle back on this file.** Three of the four "honest
+  disclosures" it carried on `dev` @ `224f3e2` were honest only while #56 was
+  *open*: a sentence saying the percent-encoding axis is unclosed on a
+  param-segment route class is a stale claim the moment the fix ships. (Not
+  quoted here — quoting it would plant the very string the ledger greps for.)
+  They were **retired into the claim list rather than deleted**, and the
+  honest-disclosure list was re-pointed at the residual that actually remains —
+  the **wide** octet class the source comment states, not the narrow one: every
+  octet outside `A-Za-z0-9-._~` keeps at least one encoded spelling, so reserved
+  characters, non-ASCII bytes and control octets whose hex carries a letter
+  digit all leave one decoded id with more than one accepted spelling, and
+  `req.params` is the sound comparison. Do not restate that list as "reserved
+  characters" — that is the narrow scope #58's review rejected, and the fixture
+  list itself now carries a non-ASCII entry alongside the reserved-character
+  one. A ledger whose honest-disclosure fixtures are never revisited becomes a
+  ledger that certifies last quarter's truth.
 - **Assertion 8 was a guard that could not fail, and #56 fixed it rather than
   inheriting it.** It asserted the three artifacts contain the substring `#56` —
   which they still do after the fix, because `#56` appears in the
   behaviour-change list. So it stayed green whether the residual was honestly
   disclosed **or** falsely announced closed, and it could only red under total
   deletion: the `AC10` comment-out shape from `docs/framework/testing.md`. It now
-  additionally requires the residual's own markers (the `a%2Bb` measurement and
-  `req.params`) in each artifact, and the substring check is kept and labelled
-  as the weak half rather than presented as coverage.
+  additionally requires the residual's own markers in each artifact — the
+  `a%2Bb` measurement, `req.params` named as the **sound** comparison, the word
+  `reserved`, and `non-ASCII` in the same sentence as `control octet` — and the
+  substring check is kept and labelled as the weak half rather than presented as
+  coverage. Each marker has its own killability baseline, named next to it in
+  the test: the first three are killed against `origin/dev`, where the residual
+  was not disclosed at all; the wider-class marker is killed against **this
+  PR's own head before its first fix round** (`ee2a2f7`), where the residual
+  *was* disclosed but in the narrow "reserved characters" wording. Measuring the
+  fourth against `origin/dev` is what made an earlier version of it vacuous for
+  two of the three artifacts — see `docs/framework/testing.md`, *"The baseline
+  for 'is this marker killable' is the PR head, not the merge base"*.
 - **The grep is repo-root-anchored (`:/`), not cwd-relative (`.`).** With `.`,
   running from `<repo>/test` searched only the test subtree — every pattern
   returned 0 while `README.md`, `docs/` and `src/` were never read, and the old

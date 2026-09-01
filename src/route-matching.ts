@@ -270,10 +270,12 @@ const PERCENT_TRIPLET = /%([0-9A-Fa-f]{2})/g;
  * `/enc/sec%2Fret` both name `sec/ret`.
  *
  * THE RESIDUAL IS WIDER THAN "RESERVED CHARACTERS" AND MUST NOT BE WRITTEN
- * DOWN THAT WAY. Any octet outside `[A-Za-z0-9-._~]` whose hex carries a letter
- * digit aliases by hex-digit case, which is every reserved character AND every
- * non-ASCII byte AND every control octet. Measured through a real listener
- * against this predicate, on a deny list holding NO reserved character at all:
+ * DOWN THAT WAY. An octet outside `[A-Za-z0-9-._~]` keeps more than one
+ * accepted spelling when its hex carries a letter digit (upper- and lower-case
+ * hex) or when a client may also send it literally. That is every reserved
+ * character, every non-ASCII byte AND every control octet whose hex carries a
+ * letter digit. Measured through a real listener against this predicate, on a
+ * deny list holding NO reserved character at all:
  *
  *   GET /i18n/caf%C3%A9          -> 401     GET /i18n/caf%c3%a9          -> 200, id "café"
  *   GET /i18n/%E5%8C%97%E4%BA%AC -> 401     GET /i18n/%e5%8c%97%e4%ba%ac -> 200, id "北京"
@@ -285,9 +287,17 @@ const PERCENT_TRIPLET = /%([0-9A-Fa-f]{2})/g;
  * `docs/agents/security-reviewer.md`) were widened to this scope rather than
  * this comment being narrowed to theirs.
  *
+ * NOT the whole complement of the unreserved set, and this qualifier is load-
+ * bearing rather than pedantry -- the sentence above is stated as measured, so
+ * it must not over-warn either. Measured counterexamples: `%21` and `%40` are
+ * reserved and carry no letter hex digit, so they alias literal-versus-encoded
+ * rather than by hex case; `%00` and `%09` have exactly one accepted spelling
+ * and do not alias at all; `%90` is a 400 (invalid UTF-8), not an alias.
+ *
  * So a hook comparing a raw path string REMAINS UNSOUND for any id carrying an
- * octet outside `[A-Za-z0-9-._~]`, and `req.params` -- which express decodes,
- * and which is populated before `auth()` runs -- is the sound idiom. That
+ * octet outside `[A-Za-z0-9-._~]` that keeps more than one accepted spelling,
+ * and `req.params` -- which express decodes, and which is populated before
+ * `auth()` runs -- is the sound idiom. That
  * residual is the consumer's comparison to own; the module cannot close it
  * without 404ing encodings clients are required to emit.
  *

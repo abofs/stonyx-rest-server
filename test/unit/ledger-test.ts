@@ -69,9 +69,10 @@ const STALE_CLAIM_PATTERNS = [
   // shipped yet", "the percent-encoding axis is open/live" -- which is false
   // the moment the fix lands. What is deliberately NOT banned is any statement
   // that a raw-path hook is still a live finding, because after #56 that is
-  // TRUE for any id carrying an octet outside `[A-Za-z0-9-._~]` -- every
-  // reserved character, every non-ASCII byte and every control octet -- and
-  // assertion 2 pins that it stays writable. An unscoped ban in this file
+  // TRUE for any id carrying an octet outside `[A-Za-z0-9-._~]` that keeps
+  // more than one accepted spelling -- every reserved character, every
+  // non-ASCII byte and every control octet whose hex carries a letter digit --
+  // and assertion 2 pins that it stays writable. An unscoped ban in this file
   // already forbade a true statement once (see the header); this is the same
   // trap one issue later, approached from the other side.
   `[Uu]ntil #56 ships`,
@@ -98,10 +99,30 @@ const STALE_CLAIM_PATTERNS = [
 //       nothing                                 -> green (FALSE_CLOSURES[1])
 //
 // Rule 4 (over-reach) is loud when it fires; Rule 5 (under-reach) is silent.
-// These patterns are the Rule 5 half, and they are scoped to the CLAIM -- the
-// encoding class needing no further care, a raw path string being a sufficient
-// comparison, the residual being disposed of -- not to the words "closed" or
-// "resolved", which appear honestly all over this repo.
+// These patterns are the Rule 5 half.
+//
+// WHAT THEY ARE, AT THEIR ACTUAL STRENGTH: a TRIPWIRE for the phrasings
+// enumerated in FALSE_CLOSURES below, not a ban on the claim. Each pattern is
+// scoped to a subject that makes the claim false in this repo by construction
+// -- an encoding axis needing no further care, a RAW path string being a
+// sufficient comparison, #54/#56's own residual being disposed of -- and that
+// scoping is deliberate. But each ALSO requires one of a short list of verbs
+// ("fully handled", "is now safe", "RESOLVED in #56"), and plain English has
+// many more. MEASURED, against 15 natural rephrasings of those same three
+// claim-shapes: 3 caught (the three pinned in FALSE_CLOSURES), 12 escaped --
+// including "The encoding axis needs no further care after #56", which is the
+// first of the three claim-shapes above written out in ordinary words. An
+// author who wants to announce a false closure can do it without tripping this.
+//
+// It is kept, and it is deliberately NOT widened. Widening it to the bare words
+// "closed", "resolved", "handled" or "no longer applies" is the Rule 4
+// over-reach this file already committed once (see the header) and declined
+// again in the REJECTED note below -- those words appear honestly all over this
+// repo. A tripwire on the phrasings a copy-edit would most plausibly reach for
+// is worth having on its own terms. Catching the other twelve is REVIEW's job,
+// not this test's, and this comment does not claim otherwise. FALSE_CLOSURES is
+// the enumeration the tripwire actually holds for, written down so a future
+// narrowing has a fixture to fail against.
 //
 // Both directions are pinned: assertion 1c replays these against the false
 // closures below, and assertion 2 replays the WHOLE ban (stale + false-closure)
@@ -141,10 +162,12 @@ const NOTHING_REMAINS = 'nothing ' + 'remains';
 const NOW_SAFE = 'is now ' + 'safe';
 const NO_LONGER_APPLIES = 'no longer ' + 'applies';
 
-// The false closures that must NOT be writable. Written down explicitly rather
-// than left to the patterns, so a future narrowing of the patterns has a
-// fixture to fail against -- the exact service RETIRED_CLAIMS does for the
-// stale-claim half. The first two are the tampers measured green above.
+// The false closures the tripwire holds for -- the enumeration, not the claim
+// (12 of 15 natural rephrasings escape; see the FALSE_CLOSURE_PATTERNS
+// comment). Written down explicitly rather than left to the patterns, so a
+// future narrowing of the patterns has a fixture to fail against -- the exact
+// service RETIRED_CLAIMS does for the stale-claim half. The first two are the
+// tampers measured green above.
 const FALSE_CLOSURES = [
   `Percent-encoding is ${FULLY_HANDLED}; a raw-path ${HOOK_IS_SAFE}.`,
   `The reserved-character residual was ${RESOLVED_IN_56}, so ${NOTHING_REMAINS}.`,
@@ -167,8 +190,9 @@ const RETIRED_CLAIMS = [
   ['test/integration/rest-server-test.ts:295', `segment's trailing slash ${CLOSED} by an express setting -- for`]
 ] as const;
 
-// The claims #56 retired, quoted from `dev` @ 224f3e2. Two of them came from
-// this file's OWN honest-disclosure list, and that is the point worth carrying:
+// The claims #56 retired, quoted from `dev` @ 224f3e2. Three of them came from
+// this file's OWN honest-disclosure list -- three of the four it carried there
+// -- and that is the point worth carrying:
 // a sentence written as an honest disclosure of an open defect becomes a stale
 // claim the moment the defect is closed. A ledger whose fixtures are never
 // revisited certifies last quarter's truth.
@@ -197,10 +221,15 @@ const RETIRED_CLAIMS_56 = [
 // SCOPE CORRECTED IN #58's FIX ROUND. Entry 2 used to read "for any id
 // containing a reserved character". Measured false, and narrower than
 // `src/route-matching.ts` -- which already says "every non-ASCII octet" and is
-// the copy that was right. ANY octet outside `[A-Za-z0-9-._~]` whose hex has a
-// letter digit aliases by hex-digit case, so the class is every reserved
-// character AND every non-ASCII byte AND every control octet. Measured through
-// a real listener on a deny list holding no reserved character at all:
+// the copy that was right. An octet outside `[A-Za-z0-9-._~]` keeps more than
+// one accepted spelling when its hex carries a letter digit or when a client
+// may also send it literally, so the class is every reserved character AND
+// every non-ASCII byte AND every control octet whose hex carries a letter
+// digit. NOT the whole complement of the unreserved set, and the second fix
+// round narrowed it back to this: `%21`/`%40` alias literal-versus-encoded and
+// not by hex case, `%00`/`%09` have exactly one accepted spelling, and `%90` is
+// a 400. Measured through a real listener on a deny list holding no reserved
+// character at all:
 // `GET /i18n/caf%C3%A9` -> 401 while `GET /i18n/caf%c3%a9` -> 200 id "café";
 // `GET /i18n/%E5%8C%97%E4%BA%AC` -> 401 while the lowercase-hex spelling
 // -> 200; `GET /i18n/a%0Db` -> 401 while `GET /i18n/a%0db` -> 200. A consumer
@@ -293,7 +322,8 @@ module('[Acceptance] Tripwire ledger (#54 AC3, #56 AC8)', function() {
     // claim what it claims. Every pattern in 1/1b bans the PENDING framing; a
     // false announcement of CLOSURE uses the opposite words and was measured
     // green against them (see the FALSE_CLOSURE_PATTERNS comment). These are
-    // the sentences that must NOT be writable.
+    // the phrasings the tripwire holds for -- not the whole claim, which is not
+    // reachable by regex; 12 of 15 natural rephrasings escape it, measured.
     for (const closure of FALSE_CLOSURES) {
       const matched = FALSE_CLOSURE_PATTERNS.some(pattern => new RegExp(pattern).test(closure));
       assert.ok(matched, `1c. the false-closure patterns catch: "${closure}"`);
@@ -378,17 +408,39 @@ module('[Acceptance] Tripwire ledger (#54 AC3, #56 AC8)', function() {
     // that every octet OUTSIDE `[A-Za-z0-9-._~]` must stay encodable, so one
     // decoded id still has more than one accepted spelling and a raw-path
     // comparison remains unsound for it. That class is every reserved
-    // character, every non-ASCII byte and every control octet; the narrow
-    // "reserved characters" wording was corrected in #58's fix round.
+    // character, every non-ASCII byte and every control octet whose hex carries
+    // a letter digit; the narrow "reserved characters" wording was corrected in
+    // #58's fix round, and the over-broad "every control octet" reading of the
+    // correction was narrowed back in its second round.
+    //
+    // KILLABILITY IS MEASURED PER ARTIFACT, AND AT THE RIGHT BASELINE. Each
+    // marker below names the revision it is killable against, and the revision
+    // differs by marker because the markers guard different claims. A marker
+    // that guards "the residual is disclosed AT ALL" is killed against
+    // `origin/dev`, where it was not disclosed. A marker that guards "the
+    // disclosure states the WIDER class" cannot be killed against `origin/dev`
+    // -- the narrow disclosure it exists to reject did not exist there either.
+    // Its baseline is `ee2a2f7`, THIS BRANCH's head before its first fix round,
+    // which is exactly the narrow wording the review rejected. See
+    // docs/framework/testing.md, "The baseline for 'is this marker killable' is
+    // the PR head, not the merge base": an earlier version of the wider-class
+    // marker was the bare substring `non-ASCII`, measured 0/0/0 on `origin/dev`
+    // and concluded killable -- but README.md and docs/project-structure.md had
+    // each already gained one `non-ASCII` from an UNRELATED paragraph added
+    // earlier in this same PR, so it was vacuous for two of the three
+    // artifacts. Reverting all three files together still reds, which is why
+    // the whole-set revert is not the measurement to trust; the proof below is
+    // one file at a time.
     //
     // WHAT THIS BLOCK COVERS, stated so nobody reads more into it than it does.
     // It is a PRESENCE check on four markers, and it fails when a marker is
     // removed:
     //
-    //   - `a%2Bb` -- the measurement. 0 hits in all three artifacts on
-    //     `origin/dev`, so deleting it reds this. Measured: renaming this
-    //     marker reds assertion 9 while assertion 8 stays green, which is the
-    //     whole AC8 demonstration.
+    //   - `a%2Bb` -- the measurement. Guards that the residual is disclosed at
+    //     all; baseline `origin/dev`, 0 hits in all three artifacts, so
+    //     deleting it reds this. Measured: renaming this marker reds assertion
+    //     9 while assertion 8 stays green, which is the whole AC8
+    //     demonstration.
     //   - `req.params` NAMED AS THE SOUND comparison -- a REGEX, not a
     //     substring. The bare substring `req.params` cannot fail here: it
     //     already appeared 2/1/2 times in README.md,
@@ -396,11 +448,18 @@ module('[Acceptance] Tripwire ledger (#54 AC3, #56 AC8)', function() {
     //     `origin/dev`, BEFORE #56 existed, so deleting #56's remedy sentence
     //     left this at 1 pass / 0 fail. Corrected in #58's fix round to require
     //     `req.params` and the word "sound" in one sentence, which is 0 hits on
-    //     `origin/dev` and therefore killable.
-    //   - `reserved` -- 0 hits on `origin/dev` too.
-    //   - `non-ASCII` -- added in #58's fix round, because "reserved" alone let
-    //     the three docs scope the residual too narrowly. 0 hits on
-    //     `origin/dev` in all three artifacts, so it is killable too.
+    //     `origin/dev` and therefore killable. Same claim, same baseline, as
+    //     `a%2Bb`.
+    //   - `reserved` -- same claim and baseline again; 0 hits on `origin/dev`.
+    //   - THE WIDER CLASS -- `non-ASCII` and `control octet` in ONE SENTENCE, a
+    //     regex and not the bare substring `non-ASCII`, for the reason above.
+    //     Different claim, so a different baseline: measured at `ee2a2f7` it is
+    //     0 hits in all three of README.md, docs/project-structure.md and
+    //     docs/agents/security-reviewer.md, where the bare substring was
+    //     1/1/0. It is therefore killable in each artifact independently, and
+    //     the three single-file reverts that prove it are recorded on PR #58.
+    //     `control octet` is the discriminator: it is 0 at `ee2a2f7` in every
+    //     one of the three, and the narrow wording cannot produce it.
     //
     // WHAT IT DOES NOT COVER, and this is the half whose earlier wording
     // over-claimed. A presence check cannot see a false ANNOUNCEMENT of
@@ -408,9 +467,11 @@ module('[Acceptance] Tripwire ledger (#54 AC3, #56 AC8)', function() {
     // any. Measured on this branch, both at 41 pass / 0 fail before #58:
     // commenting out the honest residual and replacing its heading with a
     // "fully handled" claim, and adding a false "resolved" sentence while
-    // removing nothing. That gap is now covered by FALSE_CLOSURE_PATTERNS and
-    // assertion 1c -- by the BAN, not by this block. Do not restore the claim
-    // that this block catches a false closure; it never did.
+    // removing nothing. Those two shapes are now tripped by
+    // FALSE_CLOSURE_PATTERNS and assertion 1c -- by the BAN, not by this block,
+    // and as a tripwire on enumerated phrasings rather than as coverage of the
+    // claim (12 of 15 rephrasings still escape it; see that comment). Do not
+    // restore the claim that this block catches a false closure; it never did.
     const RESIDUAL_ARTIFACTS = [
       ['README.md', readme],
       ['docs/project-structure.md', projectStructure],
@@ -422,11 +483,18 @@ module('[Acceptance] Tripwire ledger (#54 AC3, #56 AC8)', function() {
     // both orderings).
     const NAMES_THE_REMEDY = /req\.params[^.]{0,160}\bsound\b|\bsound\b[^.]{0,160}req\.params/;
 
+    // The wider-class marker. `non-ASCII` and `control octet` inside one
+    // sentence, `[^.]` stopping at the sentence-ending period as above, and
+    // `\s+` because both docs wrap the phrase across a line break. The bare
+    // substring `non-ASCII` is what this replaces: 1/1/0 at `ee2a2f7` from
+    // unrelated paragraphs, 0/0/0 for this regex at the same commit.
+    const NAMES_THE_WIDER_CLASS = /non-ASCII[^.]{0,140}control\s+octets?|control\s+octets?[^.]{0,140}non-ASCII/;
+
     for (const [name, contents] of RESIDUAL_ARTIFACTS) {
       assert.ok(contents.includes('a%2Bb'), `9. ${name} carries the measured two-spellings-one-id example (a+b / a%2Bb) rather than dropping the measurement`);
       assert.ok(NAMES_THE_REMEDY.test(contents), `9. ${name} names req.params as the SOUND comparison, not just the limitation (a bare "req.params" mention cannot fail -- it predates #56 in all three artifacts)`);
       assert.ok(contents.includes('reserved'), `9. ${name} names reserved characters among what keeps the residual open`);
-      assert.ok(/non-ASCII/.test(contents), `9. ${name} states the residual's WIDER class (non-ASCII octets), not only reserved characters -- an i18n consumer reads the narrow wording as not applying to them`);
+      assert.ok(NAMES_THE_WIDER_CLASS.test(contents), `9. ${name} states the residual's WIDER class -- non-ASCII bytes AND control octets in one sentence, not only reserved characters (a bare "non-ASCII" mention cannot fail: README.md and docs/project-structure.md each already carried one at ee2a2f7, from a paragraph unrelated to the residual)`);
     }
 
     // 10. The opt-out must be LOUD, not inherited silently -- stonyx#95's
