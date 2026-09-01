@@ -1,7 +1,7 @@
-import express, { type Request as ExpressRequest, type Response as ExpressResponse, type Express } from 'express';
+import express, { type Request as ExpressRequest, type Response as ExpressResponse, type NextFunction, type Express } from 'express';
 import config from 'stonyx/config';
 import { makeArray } from '@stonyx/utils/object';
-import applyRouteMatching from './route-matching.js';
+import applyRouteMatching, { shouldRejectTarget } from './route-matching.js';
 
 const METHODS = new Set(['get', 'post', 'put', 'delete', 'patch']);
 
@@ -41,7 +41,7 @@ export default class Request {
     const api = express();
     api.disable('x-powered-by');
 
-    // Applies BOTH route-matching settings: case sensitive routing
+    // Applies BOTH route-matching SETTINGS: case sensitive routing
     // (abofs/stonyx-rest-server#47) and strict routing (#50). For #47 this
     // call closes sub-paths (/public/SUCCESS) and the parent's call closes the
     // mount segment; for #50 THIS call closes the entire trailing-slash
@@ -49,6 +49,15 @@ export default class Request {
     // role. Must stay in the constructor: registerCalls() materializes this
     // router, and a set applied afterwards has no effect. The parent app's
     // setting does not reach here -- see src/route-matching.ts.
+    //
+    // The third route-matching control, `canonicalRoutes` (#54), is NOT applied
+    // here and must not be moved here. It is not an express setting, and its
+    // timing contract is the opposite of these two: it is read PER REQUEST
+    // inside the handler closure in registerCalls() below, via
+    // shouldRejectTarget(). These two are constructor-timed because a late
+    // `set` is silently ineffective; that hazard does not exist for #54, and
+    // reading it per request is what lets the unit AC flip the flag between
+    // probes.
     applyRouteMatching(api);
 
     this.expressInstance = api;
@@ -65,7 +74,30 @@ export default class Request {
       }
 
       for (const [route, handler] of Object.entries(handlers)) {
-        (expressInstance as unknown as Record<string, (route: string, handler: (req: ExpressRequest, res: ExpressResponse) => Promise<void>) => void>)[method](route, async (req: ExpressRequest, res: ExpressResponse) => {
+        (expressInstance as unknown as Record<string, (route: string, handler: (req: ExpressRequest, res: ExpressResponse, next: NextFunction) => Promise<void>) => void>)[method](route, async (req: ExpressRequest, res: ExpressResponse, next: NextFunction) => {
+          // abofs/stonyx-rest-server#54 -- reject a request whose RAW target is
+          // not the canonical path express matched, closing two authorization
+          // bypasses against hooks that authorize on `req.originalUrl`: the
+          // mount-root trailing slash and the absolute-form request target.
+          //
+          // Two properties of this line are load-bearing, and each has its own
+          // red-able assertion:
+          //
+          //   1. It runs BEFORE auth, and OUTSIDE `if (this.auth)`. Gating it on
+          //      the hook would leave `GET /public/` at 200 and make a security
+          //      control depend on an unrelated consumer choice.
+          //   2. It rejects with `next('router')`, NOT sendStatusResponse() or
+          //      res.sendStatus(404). Measured: sendStatus returns
+          //      `text/plain "Not Found"` while a genuine miss returns
+          //      `text/html <pre>Cannot GET ...</pre>` -- a working ORACLE
+          //      telling an attacker the route exists but was spelled wrong.
+          //      next('router') exits this sub-app's router into finalhandler
+          //      and is shape-identical to a real miss (same status, same
+          //      Content-Type, same CSP header). Routing it through
+          //      sendStatusResponse() would additionally re-introduce the
+          //      oracle for any consumer who sets a 404 in `statusMap`.
+          if (shouldRejectTarget(req)) return next('router');
+
           // Run auth after route matching so request.params is populated
           if (this.auth) {
             const status = this.auth(req, getState(req));
