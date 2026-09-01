@@ -81,7 +81,7 @@ Configuration is read from `stonyx/config` under `restServer`:
 | `enableHealthCheck` |   **Boolean**     | `true`      | Register `GET /health` endpoint (disable via `REST_HEALTH_CHECK_DISABLE=true`) |
 | `caseSensitiveRoutes` | **Boolean**   | `true`      | Match route paths case-sensitively. Disable via `REST_CASE_SENSITIVE_ROUTES=false`. See [Route Matching Strictness](#route-matching-strictness) — **disabling this re-opens a security hole**. |
 | `strictRoutes`    | **Boolean**   | `true`      | Match route paths strictly, so a trailing slash does not match a route registered without one. Disable via `REST_STRICT_ROUTES=false`. See [Route Matching Strictness](#route-matching-strictness) — **disabling this re-opens a security hole**, and note `GET /health/` now 404s. |
-| `canonicalRoutes` | **Boolean**   | `true`      | Reject a request whose raw target is not the canonical path express matched, before your `auth` hook runs. Disable via `REST_CANONICAL_ROUTES=false`. See [Route Matching Strictness](#route-matching-strictness) — **disabling this re-opens a security hole**, and note `GET /route/` at a mount root and **every** absolute-form request target now 404. |
+| `canonicalRoutes` | **Boolean**   | `true`      | Reject a request whose raw target is not the canonical path express matched, before your `auth` hook runs. Disable via `REST_CANONICAL_ROUTES=false`. See [Route Matching Strictness](#route-matching-strictness) — **disabling this re-opens a security hole**, and note `GET /route/` at a mount root and every absolute-form request target now 404 on the routes this module registers (see the scope limit under [Upgrading](#upgrading-behaviour-changes)). |
 |  `trustProxy`   |     **Boolean**     | `false`     | Trust reverse proxy headers (e.g. `X-Forwarded-Proto`). Enable via `REST_TRUST_PROXY=true` when running behind a load balancer such as AWS ALB/ELB to ensure correct protocol detection. |
 |    `statusMap`    |      **Object**     | `{}`        | Optional mapping of HTTP status codes to custom messages   |
 
@@ -165,26 +165,45 @@ against `req.originalUrl` — the field express does not normalize:
 GET /admin                           401      401   (hook fires, request blocked)
 GET /admin/                          200      404   (hook never fired; now a miss)
 GET http://host/admin                200      404   (absolute-form; hook never fired)
-GET http://host/admin/settings       200      404   (absolute-form, and every other route)
+GET http://host/admin/settings       200      404   (absolute-form; every route from a request class)
 ```
 
 The second vector is the one to check first. [RFC 9112
 §3.2.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2.2) permits an
 **absolute-form** request target, express routes it, and it hands your hook the
 whole URI — `req.originalUrl === "http://host/admin"`. Unlike the mount-root
-slash, that affects **every route**, not one edge.
+slash, that affects **every route mounted from a request class**, not one edge.
+The qualifier is a registration-site limit, not a special case for one URL: the
+check runs inside the handlers this module registers, so anything you register
+directly on `RestServer.instance.api` is outside it. In this repo that is
+`/health` alone, and `GET http://host/health` still returns 200 — measured.
 
 The target is compared **raw**. It is not parsed, normalized or resolved first:
 normalizing it would launder exactly the string your hook is exposed to and
 re-open the absolute-form vector by construction. Only the query string is
 removed before comparison, so `GET /admin?x=1` still reaches your hook — **strip
 the query yourself** if your hook compares `req.originalUrl` against a fixed
-path, or it will not match. Rejections are indistinguishable from a genuine miss
-by design; see [Upgrading](#upgrading-behaviour-changes).
+path, or it will not match (see [Consumer
+Contracts](#consumer-contracts)). Rejections are indistinguishable from a
+genuine miss by design; see [Upgrading](#upgrading-behaviour-changes).
 
 Routes registered *with* a literal trailing slash are unaffected — their
-canonical target carries the slash. So are param routes, index-mounted route
-classes, and query strings on canonical paths.
+canonical target carries the slash. So are index-mounted route classes and
+query strings on canonical paths.
+
+**Param routes: "unaffected" means "no regression", not "no residual".**
+`/resource/:id` keeps matching exactly as it did. But percent-encoding is not
+normalized on either side of the comparison — express decodes only
+`req.params`, not `req.path` and not `req.originalUrl` — so `target` and
+`canonical` are *both* the encoded string and this check passes the request
+through by construction. Measured on a hook that authorizes on
+`req.originalUrl` with the query correctly stripped, on a `/:id` route:
+`GET /enc/secret` → 401, `GET /enc/%73ecret` → **200 with the guarded handler
+running unauthenticated**, identically before and after this change. It is a
+residual, not something `canonicalRoutes` introduced, and it is **wider** than
+the two vectors above: `%73` defeats a `req.path` hook as well. Tracked as
+[#56](https://github.com/abofs/stonyx-rest-server/issues/56) — until it ships,
+do not read a param-segment route class as covered on this axis.
 
 #### What this does not do
 
@@ -219,12 +238,19 @@ All three controls change which requests match, so all three are
 consumer-visible.
 
 **Clients or forward proxies sending absolute-form request targets now get 404
-on every route.** `GET http://host/admin HTTP/1.1` is a legal request target
-([RFC 9112 §3.2.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2.2)) and
-express used to route it. It is now rejected, on **every** route — for a client
-that emits it, this is a total outage, not a partial one, and it is the largest
-blast radius in this change. Reverse proxies in normal use (nginx, HAProxy,
-AWS ALB) send origin-form and are unaffected; **forward** proxies and
+on every route mounted from a request class.** `GET http://host/admin HTTP/1.1`
+is a legal request target
+([RFC 9112 §3.2.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2.2)), and
+express used to route it. It is now rejected on every route this module
+registers — for a client that emits it, this is a total outage, not a partial
+one, and it is the largest blast radius in this change. The one carve-out is a
+**registration site**, not a route: the check lives in the handlers mounted from
+your request classes, so anything registered directly on
+`RestServer.instance.api` never reaches it. `GET /health` is the only such route
+in this repo, and `GET http://host/health` still returns 200 — so do not use it
+to confirm the new rejection is live, and do not assume an authorized route you
+registered on `api` yourself is covered. Reverse proxies in normal use (nginx,
+HAProxy, AWS ALB) send origin-form and are unaffected; **forward** proxies and
 hand-rolled HTTP clients are the exposure. Remediation is
 `REST_CANONICAL_ROUTES=false`, or fix the client.
 
@@ -294,6 +320,22 @@ URL-based authorization in your application becomes bypassable along that axis
 again. They exist as one-line remediations for an existing deployment, not as a
 configuration to run on. Set the flag to restore service, then fix the client
 and remove the flag.
+
+### Consumer Contracts
+
+Three things this module deliberately does **not** do for you. Each is a state
+the framework permits, only your own discipline prevents, and that produces **no
+error and no log** when that discipline lapses — so they are collected here
+rather than left implied by the sections above.
+
+| you must | because | symptom if you don't |
+|---|---|---|
+| **Strip the query string** before comparing `req.originalUrl` to a fixed path in an `auth` hook | `canonicalRoutes` compares the query-*stripped* target — a query string is a legitimately variable part of a request target, and rejecting on it would 404 every `?`-carrying request | `GET /admin?x=1` reaches your guarded handler **unauthenticated**, 200, no error, no log. Measured identical before and after `canonicalRoutes` |
+| **Compare param values with the same decoding and casing you look them up with** | express decodes only `req.params`; `req.path` and `req.originalUrl` both stay percent-encoded, and param *values* are never case-normalized | `GET /orders/%73ecret` runs the handler with `id === "secret"` while your hook compared `%73ecret` and did not match — unauthenticated 200. Tracked as [#56](https://github.com/abofs/stonyx-rest-server/issues/56) |
+| **Return `undefined` from `auth()` to mean "authorized"** — never `0` | any integer return is sent as the HTTP status | returning `0` sends a `0` status rather than allowing the request |
+
+`test/sample/requests/admin.ts` in this repo is the worked example of a
+correctly-written `originalUrl` hook for the first row.
 
 ### Running Behind a Load Balancer
 

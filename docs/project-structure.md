@@ -6,14 +6,14 @@ REST server module for the Stonyx framework. Provides dynamic route registration
 
 - **Package**: `@stonyx/rest-server` (v0.2.1-beta.1)
 - **License**: Apache-2.0
-- **Entry point**: `src/main.js`
+- **Entry point**: `src/main.ts`
 - **Module type**: ESM (`"type": "module"`)
 - **Node version**: v24.13.0 (per `.nvmrc`)
 - **Package manager**: pnpm
 
 ## Architecture
 
-### RestServer (src/main.js)
+### RestServer (src/main.ts)
 
 Singleton class wrapping an Express 5 instance.
 
@@ -24,7 +24,7 @@ Singleton class wrapping an Express 5 instance.
 - **`mountRoute(routeClass, { name, options })`** — instantiates the imported Request subclass, wires up the `authorization` middleware if present, calls `registerCalls()`, and mounts the sub-app at `/<filename>`
 - **`RestServer.close()`** — static method to close the server
 
-### Request (src/request.js)
+### Request (src/request.ts)
 
 Base class for route definitions. Each file in the requests directory exports a class extending `Request`.
 
@@ -44,14 +44,34 @@ Base class for route definitions. Each file in the requests directory exports a 
 
 Valid HTTP methods (enforced): `get`, `post`, `put`, `delete`, `patch`
 
-### applyRouteMatching (src/route-matching.ts)
+### src/route-matching.ts
 
-Single-function module holding this package's route-matching settings, called
-from both express constructors above. Holds two settings: `case sensitive
-routing` (#47) and `strict routing` (#50). See
-[Case-sensitive routing (#47)](#case-sensitive-routing-47) and
-[Strict routing (#50)](#strict-routing-50) — the two settings do NOT have the
-same per-site behaviour, and the difference matters.
+The config-read site for the **route-matching family** — the three keys
+`caseSensitiveRoutes` (#47), `strictRoutes` (#50) and `canonicalRoutes` (#54).
+Two exports, with deliberately different lifetimes:
+
+| export | kind | lifetime | reads |
+|---|---|---|---|
+| `applyRouteMatching(api)` (default) | applies express **settings** | called from **both** express constructors, and must stay constructor-timed — express materializes a router lazily on first route registration, so a setting applied later is silently ineffective | `caseSensitiveRoutes`, `strictRoutes` |
+| `shouldRejectTarget(req)` (named) | a **per-request predicate**, not a setting | called from the handler closure in `Request.registerCalls()`, once per request | `canonicalRoutes` |
+
+**Admission rule for this file** — it exists so a reviewer does not have to
+re-derive the judgement each time something route-shaped needs a home. What
+belongs here is *a config read for the route-matching family, and the code that
+directly consumes it*. That is what makes one file the right shape despite the
+two lifetimes: all three keys share one guard-polarity rule (`!== false`, fail
+toward the safe value), and splitting `shouldRejectTarget()` into its own module
+would put two of the three flags in one file and the third in another, leaving
+no single place where that rule sits beside every instance of it. What does
+**not** belong: anything that is neither a member of this family nor its
+consumer, and — specifically — a *fourth* member. Three is the documented family
+size; a fourth is the point at which to split by lifetime (settings vs
+per-request checks) rather than growing this file again.
+
+See [Case-sensitive routing (#47)](#case-sensitive-routing-47),
+[Strict routing (#50)](#strict-routing-50) and
+[Canonical request target (#54)](#canonical-request-target-54) — the two
+settings do NOT have the same per-site behaviour, and the difference matters.
 
 ## Configuration Reference
 
@@ -62,7 +82,7 @@ From `config/environment.js`. All values are overridable via environment variabl
 | `enableHealthCheck` | **Boolean**       | `true`                        | `REST_HEALTH_CHECK_DISABLE=true` to disable | Registers `GET /health` returning 200                     |
 | `caseSensitiveRoutes` | **Boolean**     | `true`                        | `REST_CASE_SENSITIVE_ROUTES=false` to disable | Match route paths case-sensitively. Applied via `app.set('case sensitive routing', true)` in **both** the `RestServer` constructor and the `Request` constructor -- see below. Disabling re-opens the URL-authorization bypass of #47 |
 | `strictRoutes`      | **Boolean**       | `true`                        | `REST_STRICT_ROUTES=false` to disable       | Match route paths strictly -- a trailing slash does not match a route registered without one. Applied via `app.set('strict routing', true)` in the same two constructors. Disabling re-opens the URL-authorization bypass of #50. Separate key from `caseSensitiveRoutes` on purpose -- see below |
-| `canonicalRoutes`   | **Boolean**       | `true`                        | `REST_CANONICAL_ROUTES=false` to disable    | Reject a request whose RAW target is not the canonical path express matched, ahead of the consumer's `auth` hook. **Not an express setting** -- a per-request check, `shouldRejectTarget()` in `src/route-matching.ts`, called from the handler closure in `Request.registerCalls()`. Disabling re-opens BOTH `req.originalUrl` bypasses of #54 (mount-root trailing slash, and absolute-form request target on every route). Separate key from the two above on purpose -- see below |
+| `canonicalRoutes`   | **Boolean**       | `true`                        | `REST_CANONICAL_ROUTES=false` to disable    | Reject a request whose RAW target is not the canonical path express matched, ahead of the consumer's `auth` hook. **Not an express setting** -- a per-request check, `shouldRejectTarget()` in `src/route-matching.ts`, called from the handler closure in `Request.registerCalls()`. Disabling re-opens BOTH `req.originalUrl` bypasses of #54 (mount-root trailing slash, and absolute-form request target on every route registered through `Request.registerCalls()`). Separate key from the two above on purpose -- see below |
 | `trustProxy`        | **Boolean**       | `false`                       | `REST_TRUST_PROXY=true` to enable           | Trust reverse proxy headers (`X-Forwarded-Proto`) for correct protocol detection behind load balancers |
 | `origin`            | **String**        | `'*'`                         | `REST_CORS_ORIGIN`         | CORS allowed origin(s)                                          |
 | `methods`           | **String**        | `'GET,POST,PATCH,PUT,DELETE'` | `REST_CORS_METHODS`        | CORS allowed methods                                            |
@@ -251,6 +271,30 @@ It must also not go through `Request.sendStatusResponse()`, which would route
 the body through `config.restServer.statusMap` and re-introduce the oracle for
 any consumer who sets a 404 entry. Killed by AC1.5.
 
+Reproduction note: written as `return res.sendStatus(404)` this mutant does not
+compile — TS2345, the handler closure is typed `Promise<void>`. Write it
+`{ res.sendStatus(404); return; }`. A build failure here is the mutant being
+mis-written, not the mutant being unbuildable.
+
+**5. It runs BEFORE the `auth` block, which is a separate property from running
+outside it.** AC1.6 probes a route class with *no* hook, so it stays green if
+the call is merely moved *below* `if (this.auth)` rather than gated on it.
+Measured with it moved: the suite stayed **34 pass / 0 fail** while
+`GET http://HOST/private/failure` answered **505** — the consumer hook's own
+status, which is the same oracle class property 4 exists to prevent, and the
+hook itself ran on a request the module was about to reject (so any hook with
+side effects — audit write, rate-limit counter, session refresh — fires on a
+rejected request). Killed by AC1.11.
+
+**6. `&& req.baseUrl` in the canonical expression is load-bearing, not a
+redundant truthiness guard.** A route class named `index` mounts at `/`
+(`mountRoute()` in `src/main.ts`), the one mount shape where `req.baseUrl` is
+`''`. Without the conjunct, `GET /` compares the raw target `'/'` against a
+canonical of `''` and the **application root** is rejected. Measured before it
+had a guard: shipped `GET /` → 200, conjunct dropped → 404, suite
+**34 pass / 0 fail both ways**. Killed by AC1.12, against
+`test/sample/requests/index.ts`.
+
 **Timing contract — deliberately the opposite of its two siblings.**
 `caseSensitiveRoutes` and `strictRoutes` are read once in a **constructor** and
 are silently ineffective if applied late, because express materializes a router
@@ -263,10 +307,14 @@ neither a setting nor constructor-timed.
 
 **Scope limits, stated rather than quietly left open:**
 
-- The check lives in `Request.registerCalls()`, so routes registered directly on
-  the parent app — `/health` only, in this repo — are not covered.
-  `GET http://HOST/health` still returns 200. `/health` has no `auth` hook, so
-  there is nothing to bypass; this is a scope limit, not a residual bypass.
+- The check lives in `Request.registerCalls()`, so the limit is a **registration
+  site**, not a particular route: anything registered directly on the parent app
+  is not covered. `/health` is the only such route in this repo
+  (`src/main.ts:85`) and `GET http://HOST/health` still returns 200 — measured —
+  but `RestServer.instance.api` is a public property, so a consumer registering
+  an authorized route on it directly is equally outside this control. `/health`
+  itself has no `auth` hook, so there is nothing to bypass there; state the limit
+  as the registration site rather than as "`/health` is special".
 - Only the query string is stripped before comparison, so `GET /admin?x=1`
   reaches the hook. A query string is a legitimately variable part of a request
   target and rejecting on it would 404 every `?`-carrying request. A consumer
@@ -275,14 +323,32 @@ neither a setting nor constructor-timed.
   the fix, so this is the consumer's comparison to own, and the README says so.
   `test/sample/requests/admin.ts` models the correctly-written hook and AC1.8
   asserts the module still delivers `GET /admin?x=1` to it.
+- **Percent-encoding is not normalized on either side, and this one is a live
+  residual rather than a benign limit.** Express decodes only `req.params` —
+  neither `req.path` nor `req.originalUrl` — so for `GET /enc/%73ecret` both
+  `target` and `canonical` are the encoded string, they agree, and
+  `shouldRejectTarget()` passes the request through *by construction*. No change
+  to the comparison can see it: the disagreement is between the matched target
+  and the *decoded* value the handler acts on. Measured on a hook authorizing on
+  `req.originalUrl` with the query correctly stripped, on a `/:id` route:
+  `GET /enc/secret` → 401, `GET /enc/%73ecret` → **200, guarded handler,
+  unauthenticated** — identical on `origin/dev`, so a residual and not a #54
+  regression. It is **wider** than the two axes #54 closes: `%73` defeats a
+  `req.path` hook too. Tracked as
+  [#56](https://github.com/abofs/stonyx-rest-server/issues/56)
+  (`priority-critical`).
 
-**Not affected** (measured): routes registered with a literal trailing slash,
+**No regression** (measured): routes registered with a literal trailing slash,
 param routes, index-mounted route classes, query strings on canonical paths, and
-`/health`.
+`/health`. **"No regression" is not "no residual"** — for param routes the two
+differ, see the percent-encoding scope limit above (#56), and for `/health` the
+reason is that it is outside the check entirely.
 
 Consumer-visible behaviour change, on two axes: `GET /route/` at a mount root
-goes 200 → 404, and **every** route goes 200 → 404 for a client emitting an
-absolute-form request target. The second has the larger blast radius — for such
+goes 200 → 404, and every route **registered through `Request.registerCalls()`**
+goes 200 → 404 for a client emitting an absolute-form request target — routes
+registered directly on the parent app, `/health` included, do not, per the scope
+limits above. The second has the larger blast radius — for such
 a client it is a total outage. Rejections are indistinguishable from a genuine
 miss by design and this module emits no request logging, so the only symptom is
 a bare `Cannot GET …`.
@@ -291,10 +357,10 @@ a bare `Cannot GET …`.
 
 Tests use **QUnit** and run via `stonyx test` (the `npm test` script).
 
-### test/config/environment.js
+### test/config/environment.ts
 Overrides `restServer.dir` to `'./test/sample/requests'` so tests load sample request classes.
 
-### test/unit/request-test.js
+### test/unit/request-test.ts
 Unit tests for `Request` static methods:
 - `getState` — creates/returns state object on request
 - `sendStatusResponse` — sends status with optional `statusMap` message
@@ -302,17 +368,42 @@ Unit tests for `Request` static methods:
 
 ### test/unit/ledger-test.ts
 Acceptance anchor for #54's AC3. Runs `git grep -nE` over the tracked tree for
-the four stale phrasings that #50 left behind — the ones asserting that the
-mount-root edge is unclosable, that a `/public/` -> 404 assertion is
-unachievable, that the edge is still open, and the instruction not to close it
-in `route-matching.ts` — and asserts **0** hits, so no artifact can go on
-telling a reader the edge is unclosable after #54 closed it. The same grep
-returned **8 hits across 5 files** on `origin/dev` @ `f5c9a24`. The pattern is
-assembled from fragments in the test rather than written out, because a tracked
-file containing it would match itself; the test carries a positive control so a
-mistyped pattern cannot produce a vacuous zero.
+the four stale claims that #50 left behind — that the mount-root edge is
+unclosable by anything, that a `/public/` -> 404 assertion is unachievable, that
+the edge is still open, and the instruction not to close it in
+`route-matching.ts` — and asserts **0** hits, so no artifact can go on telling a
+reader the edge is unclosable after #54 closed it. The same grep returned **8
+hits across 5 files** on `origin/dev` @ `f5c9a24`. The patterns are assembled
+from fragments in the test rather than written out, because a tracked file
+containing them would match itself.
 
-### test/integration/rest-server-test.js
+Three properties of it are load-bearing:
+
+- **The patterns are scoped to the CLAIMS, not to the English.** An earlier
+  version banned the bare substrings for "the edge is still open" and "it cannot
+  be shut" anywhere in the tree — which is the exact wording needed to disclose
+  #56's residual honestly, so a guard against an old *dishonest* claim became a
+  guard against a new *honest* one. Each pattern now requires the #54 subject
+  (the mount root, `/public/`, or "by an express setting") on the same line. The
+  test pins both directions: assertion 1 replays the scoped patterns against all
+  8 retired claims quoted from `origin/dev`, so narrowing cannot disarm the ban;
+  assertion 2 asserts four honest #56 disclosures are *not* matched.
+- **The grep is repo-root-anchored (`:/`), not cwd-relative (`.`).** With `.`,
+  running from `<repo>/test` searched only the test subtree — every pattern
+  returned 0 while `README.md`, `docs/` and `src/` were never read, and the old
+  positive control still passed because 15 of its hits lived under `test/`. The
+  cwd guard was incidental (a `readFileSync` ENOENT 17 lines further down) and
+  would have vanished the moment those reads were made dirname-relative. The
+  positive control now asserts the grep matches **outside** `test/`, so it
+  proves scope rather than mere execution.
+- **Only exit 1 with empty output is treated as "no matches";** any other status
+  rethrows, so a bad pattern or a non-repository cannot be swallowed as a zero.
+
+Limit worth stating: `git grep` sees **tracked** files only, so a stale phrasing
+in a brand-new file that has not been `git add`ed yet is not caught locally. At
+the merge gate everything is tracked.
+
+### test/integration/rest-server-test.ts
 Integration tests that boot the full server and make HTTP requests:
 - 404 for non-existent routes
 - `/public` — JSON response, 200 OK default, URL params, middleware (success/failure), `this` binding for handlers and middleware
@@ -323,6 +414,7 @@ Integration tests that boot the full server and make HTTP requests:
 Sample Request subclasses used by integration tests:
 - `public.ts` — `PublicRequest` with various GET handlers demonstrating middleware, params, binding. No `auth()` hook, which is what makes it the fixture for #54's AC1.6
 - `private.ts` — `PrivateRequest` with `auth()` hook that rejects `/failure` with 505
+- `index.ts` — `IndexRequest`, mounted at `/` because of its filename. The only mount shape where `req.baseUrl` is `''`, which is what gives the `&& req.baseUrl` conjunct in `shouldRejectTarget()` a regression guard (#54 AC1.12): without the conjunct `GET /` 404s and, before this fixture existed, the suite stayed 34/0 either way
 - `admin.ts` — `AdminRequest` with an `auth()` hook authorizing on **`req.originalUrl`**, the field express does not normalize. That shape is the point: rewritten to compare `req.path` the fixture cannot express #54's defect at all, since `req.baseUrl + req.path` is `/admin/` for both spellings of the mount root. Also registers `/legacy/` *with* a literal trailing slash, so an over-broad "target must not end in /" rule turns AC1.10 red
 
 ## CI/CD
@@ -356,21 +448,23 @@ stonyx-rest-server/
 ├── config/
 │   └── environment.js             # Default config with env var overrides
 ├── src/
-│   ├── main.js                    # RestServer class (singleton, Express wrapper)
-│   └── request.js                 # Request base class (handler registration, auth hook)
+│   ├── main.ts                    # RestServer class (singleton, Express wrapper)
+│   ├── request.ts                 # Request base class (handler registration, auth hook)
+│   └── route-matching.ts          # Route-matching family: settings (#47/#50) + canonical-target check (#54)
 ├── test/
 │   ├── config/
-│   │   └── environment.js         # Test config override (dir → test/sample/requests)
+│   │   └── environment.ts         # Test config override (dir → test/sample/requests)
 │   ├── integration/
-│   │   └── rest-server-test.js    # Integration tests (QUnit)
+│   │   └── rest-server-test.ts    # Integration tests (QUnit)
 │   ├── sample/
 │   │   └── requests/
 │   │       ├── admin.ts           # Sample request with an originalUrl auth hook (#54 fixture)
-│   │       ├── private.js         # Sample private request with auth hook
-│   │       └── public.js          # Sample public request with middleware demos
+│   │       ├── index.ts           # Index-mounted class (baseUrl ''), #54 AC1.12 fixture
+│   │       ├── private.ts         # Sample private request with auth hook
+│   │       └── public.ts          # Sample public request with middleware demos
 │   └── unit/
 │       ├── ledger-test.ts         # Tripwire ledger grep (#54 AC3)
-│       └── request-test.js        # Unit tests for Request statics (QUnit)
+│       └── request-test.ts        # Unit tests for Request statics (QUnit)
 ├── .gitignore
 ├── .npmignore
 ├── .nvmrc                         # Node v24.13.0
