@@ -654,6 +654,30 @@ module('[Integration] Rest Server', function(hooks) {
 
       const encodedLiteralOpen = await rawRequest('/private/%73uccess', port);
       assert.equal(encodedLiteralOpen.status, 404, '5. GET /private/%73uccess is rejected too -- the rule is about the SPELLING, not about which handler it would have reached');
+
+      // -- 6. the check runs BEFORE the auth hook, not merely outside it ------
+      // GUARD, not a defect test: pre-fix this target answered 403, which is a
+      // DENY, so nothing was open here. It exists because "outside
+      // `if (this.auth)`" and "before it" are two separate properties and #55's
+      // fix round found the second one uncovered.
+      //
+      // This is the only probe in the repo where the rule and a consumer hook
+      // both fire on the same request, and it works because `private.ts`'s hook
+      // has two clauses reading two different fields: `req.path === '/failure'`
+      // (raw, so the encoded spelling walks past it) and
+      // `req.params?.id === 'restricted'` (DECODED by express, so the encoded
+      // spelling still trips it). Move
+      // `if (shouldRejectEncoding(req)) return next('router')` below the
+      // `if (this.auth)` block and this answers 403 -- the consumer's own hook
+      // status, on a request the module was about to reject, which is the same
+      // oracle class #54's AC1.5 exists to prevent and additionally runs any
+      // side effect the hook has.
+      const encodedParamDenied = await rawRequest('/private/restricte%64', port);
+      assert.equal(encodedParamDenied.status, 404, '6. GET /private/restricte%64 is rejected by the module, not answered with the auth hook status');
+      assert.deepEqual(shapeOf(encodedParamDenied), shapeOf(genuineMiss), '6. and that rejection is still shape-identical to a genuine miss');
+
+      const canonicalParamDenied = await rawRequest('/private/restricted', port);
+      assert.equal(canonicalParamDenied.status, 403, '6. precondition: the same hook still answers 403 on the CANONICAL spelling, so the 404 above is the check and not a dead route');
     });
 
     test('AC2 - negative controls: the fix is not satisfiable by breaking routing', async function(assert) {
