@@ -140,13 +140,20 @@ GET /public/  -> req.path '/'   req.originalUrl '/public/'
 ```
 
 Express's router applies mount-prefix matching with `strict: false`
-unconditionally (`router@2.2.0`, `index.js:400-401`), so both forms reach the
-mounted route class and both arrive with `req.path === '/'`. A hook authorizing
-on `req.path` cannot tell them apart, so for that hook there is no asymmetry to
-exploit. **A hook comparing `req.originalUrl` still sees two different strings,
-and `strictRoutes` does not change that.** If your authorization compares
-`req.originalUrl` rather than `req.path`, keep whatever URL normalization you
-have.
+unconditionally (`router@2.2.0`; the file-and-line citation is in
+[`docs/project-structure.md`](docs/project-structure.md) § *Strict routing
+(#50)*), so both forms reach the mounted route class and both arrive with
+`req.path === '/'`. A hook authorizing on `req.path` cannot tell them apart, so
+for that hook there is no asymmetry to exploit. **A hook comparing
+`req.originalUrl` still sees two different strings, and `strictRoutes` does not
+change that.** If your authorization compares `req.originalUrl` rather than
+`req.path`, keep whatever URL normalization you have.
+
+No *setting* closes this, but the module can:
+[#54](https://github.com/abofs/stonyx-rest-server/issues/54) tracks closing it
+with a canonical-path check ahead of the `auth` hook. Until that ships, an
+`originalUrl` hook is bypassed by one character — `GET /admin` denied,
+`GET /admin/` reaching the route class's index handler.
 
 **It does not normalize path *parameter values*.** If your `auth()` hook rejects
 `params.id === 'restricted'`, then `GET /private/RESTRICTED` still reaches the

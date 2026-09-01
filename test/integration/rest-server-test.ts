@@ -239,10 +239,11 @@ module('[Integration] Rest Server', function(hooks) {
       // `/failure/` and the hook compares against `/failure`.
       //
       // Closed by `strict routing` on the CHILD app (src/request.ts) alone.
-      // The parent site does nothing for this: router@2.2.0 index.js:400-401
-      // hardcodes `strict: false` for Router.prototype.use, so mount segments
-      // are structurally strict-immune. This is the opposite of #47, where
-      // use() does forward `sensitive` -- do not carry the #47 shape across.
+      // The parent site does nothing for this: Router.prototype.use hardcodes
+      // `strict: false`, so mount segments are structurally strict-immune.
+      // This is the opposite of #47, where use() does forward `sensitive` --
+      // do not carry the #47 shape across. (Version-pinned citation for the
+      // upstream line: docs/project-structure.md, "Strict routing (#50)".)
       //
       // Unlike #47's AC5 there is no /:id fallthrough to absorb this: `/:id`
       // is equally strict, so `/failure/` misses it too and the status is a
@@ -289,12 +290,19 @@ module('[Integration] Rest Server', function(hooks) {
       const health = await fetch(`${endpoint}/health`);
       assert.equal(health.status, 200, 'GET /health still 200');
 
-      // Documented invariant, NOT a defect and NOT something to "fix" later.
-      // The mount segment's trailing slash is structurally unclosable: for both
-      // /public and /public/ the mounted sub-app receives req.path === '/', so
-      // a req.path-based auth hook sees no difference and there is no
-      // asymmetry to close. Measured 200 under all four flag combinations.
-      // The residual is req.originalUrl, which DOES differ -- see README.
+      // Documented invariant of the SETTING, and a regression guard rather
+      // than evidence: no mutation of this fix can turn it red. The mount
+      // segment's trailing slash cannot be closed by an express setting -- for
+      // both /public and /public/ the mounted sub-app receives
+      // req.path === '/', so a req.path-based auth hook sees no difference and
+      // there is nothing for strict routing to reject. Measured 200 under all
+      // four flag combinations.
+      //
+      // This is NOT a statement that the edge is closed or unclosable. The
+      // residual is req.originalUrl, which DOES differ, and an originalUrl auth
+      // hook is bypassed by it. Closing that is tracked as #54 -- see README
+      // and docs/project-structure.md. Do not "fix" it by changing this
+      // assertion.
       const mountRoot = await fetch(`${endpoint}/public/`);
       assert.equal(mountRoot.status, 200, 'GET /public/ stays 200 — the mount-segment slash is not closed by strict routing');
     });

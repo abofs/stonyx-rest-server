@@ -55,25 +55,38 @@ import config from 'stonyx/config';
  *     this repo: `/health/`, the only route registered directly on the parent
  *     app. It has no security role here; do not describe it as having one.
  *
- * The cause is concrete: router@2.2.0 `index.js:400-401` hardcodes
- * `strict: false, end: false` for `Router.prototype.use`, so mount segments
- * are structurally strict-immune. That is the OPPOSITE of `sensitive`, which
- * `use()` does forward (line 399) and which is why #47's parent site closed
- * `/PUBLIC/...`. Both sites still get both settings -- they share this
- * function -- but the justification differs and the tests are built on the
- * measured split, not on the analogy.
+ * The cause is concrete: `Router.prototype.use` hardcodes `strict: false` (and
+ * `end: false`), so mount segments are structurally strict-immune. That is the
+ * OPPOSITE of `sensitive`, which `use()` DOES forward, and which is why #47's
+ * parent site closed `/PUBLIC/...`. The version-pinned file-and-line citation
+ * for that upstream behaviour is deliberately kept in ONE place --
+ * `docs/project-structure.md`, section "Strict routing (#50)" -- so a router
+ * upgrade invalidates one line rather than five. Both sites still get both
+ * settings (they share this function), but the justification differs and the
+ * tests are built on the measured split, not on the analogy.
  *
- * Consequence worth stating so nobody "fixes" it: the mount-segment trailing
- * slash (`/public/`) can never be closed by this setting, and does not need to
- * be. For both `/public` and `/public/` the mounted sub-app receives
- * `req.path === '/'`, so a `req.path` auth hook sees no difference and there is
- * no asymmetry. A test asserting `/public/` -> 404 could never pass. The
- * residual is `req.originalUrl`, which DOES differ; that is disclosed in the
- * README rather than silently closed over.
+ * Consequence worth stating so nobody expects this setting to cover it: the
+ * mount-segment trailing slash (`/public/`) cannot be closed by an express
+ * SETTING. For both `/public` and `/public/` the mounted sub-app receives
+ * `req.path === '/'`, so a `req.path` auth hook sees no difference, and a test
+ * asserting `/public/` -> 404 could never pass.
+ *
+ * That is NOT the same as saying the edge is harmless or unclosable.
+ * `req.originalUrl` does differ, and a hook authorizing on it is bypassed by
+ * one character -- measured: `GET /admin` -> 401, `GET /admin/` -> 200 with the
+ * guarded handler running unauthenticated. That is a live bypass of the same
+ * class as #47 and #50, and it IS closable by this module: a canonical-path
+ * check ahead of the `auth` call in `Request.registerCalls()`, or opt-in
+ * normalizing middleware. It is tracked as abofs/stonyx-rest-server#54. Do not
+ * close it here, and do not read this note as saying it cannot be closed.
  *
  * Both guards are `!== false` for the same reason: these flags default to the
  * truthy direction, so a truthy check fails OPEN for a consumer whose shipped
- * config predates the key.
+ * config predates the key. Both are also asserted at the unit tier for BOTH
+ * failure shapes -- key present-and-`undefined` and key absent as an own
+ * property -- in `test/unit/request-test.ts` (#47's AC6, #50's AC3). The
+ * integration tier cannot see either: with the shipped default `true`, a
+ * fail-open guard leaves every integration assertion green.
  */
 export default function applyRouteMatching(api: Express): void {
   if (config.restServer?.caseSensitiveRoutes !== false) api.set('case sensitive routing', true);

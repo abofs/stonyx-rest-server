@@ -145,13 +145,30 @@ structurally strict-immune.** This is the opposite of `sensitive`, which `use()`
 *does* forward (line 399) and which is why #47's parent site closed
 `/PUBLIC/...`.
 
-That has a consequence worth stating so nobody "fixes" it: **the mount-root
-trailing slash `/public/` can never be closed by this setting.** Both `/public`
-and `/public/` reach the sub-app with `req.path === '/'`, so a `req.path` hook
-sees no difference and there is no asymmetry to exploit. A test asserting
-`/public/` → 404 could never pass, and the integration AC2 asserts it stays
-**200** precisely to record that. The residual is `req.originalUrl`, which *does*
-differ; that is disclosed in the README rather than silently closed over.
+> **This paragraph is the single authoritative citation for that upstream
+> behaviour.** The same fact is stated (without file-and-line coordinates) in
+> `README.md`, `docs/agents/security-reviewer.md`, `src/route-matching.ts` and
+> `test/integration/rest-server-test.ts`, each of which points here. Verified
+> against `router@2.2.0`; **re-verify these line numbers when `router` is
+> upgraded** — they are pinned in this one place so an upgrade invalidates one
+> line rather than five.
+
+That has a consequence worth stating so nobody expects `strictRoutes` to cover
+it: **the mount-root trailing slash `/public/` cannot be closed by an express
+setting.** Both `/public` and `/public/` reach the sub-app with
+`req.path === '/'`, so a `req.path` hook sees no difference, a test asserting
+`/public/` → 404 could never pass, and #50's integration AC2 asserts it stays
+**200** precisely to record that.
+
+**Unclosable by a setting is not unclosable.** The residual is
+`req.originalUrl`, which *does* differ, and a consumer hook authorizing on it is
+bypassed by one character — measured: `GET /admin` → 401, `GET /admin/` → 200
+with the guarded handler running unauthenticated. That is a live bypass of the
+same class as #47 and #50, and it is closable *by this module* (a canonical-path
+check ahead of the `auth` call in `Request.registerCalls()`, or opt-in
+normalizing middleware). It is tracked as
+[#54](https://github.com/abofs/stonyx-rest-server/issues/54) and is disclosed to
+consumers in the README. Do not record it as impossible.
 
 `strictRoutes` is a **separate config key**, not a rename or a reuse of
 `caseSensitiveRoutes`. Coupling them would force any consumer who legitimately
