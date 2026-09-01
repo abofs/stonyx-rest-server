@@ -93,23 +93,26 @@ const config = {
   //
   // DELIBERATELY NOT PINNED in test/config/environment.ts -- do not "fix" this
   // as part of abofs/stonyx-rest-server#43. Same trap as the two keys above,
-  // and now measured for all three: pinning the key in
-  // test/config/environment.ts AND inverting this line to `=== 'true'` leaves
-  // the suite fully green while an insecure default ships. The pin is quieter
-  // AND weaker than no pin, which is the outcome pinning was supposed to
-  // prevent.
+  // and now measured for all three: pin `canonicalRoutes: true` in
+  // test/config/environment.ts AND invert this line to `=== 'true'`, and the
+  // suite reports 34 pass / 0 fail while an insecure default ships. The pin is
+  // quieter AND weaker than no pin, which is the outcome pinning was supposed
+  // to prevent.
   //
-  // Unpinned, inverting this line alone turns #54's integration AC1 red.
-  // AC2 stays GREEN under that mutation, because AC2 sets `canonicalRoutes` on
-  // the config object directly and so guards src/route-matching.ts's READ
-  // rather than this default -- the two assertions cover different halves and
-  // neither subsumes the other.
+  // Unpinned, inverting this line alone reports 32 pass / 2 fail: #54's
+  // integration AC1 and #50's AC2. AC2 (unit) stays GREEN under that mutation,
+  // because it sets `canonicalRoutes` on the config object directly and so
+  // guards src/route-matching.ts's READ rather than this default -- the two
+  // assertions cover different halves and neither subsumes the other.
+  // Conversely, weakening the READ to `=== true` reports 33 pass / 1 fail with
+  // AC2 as the only failure and AC1 fully green. Both measurements are on the
+  // #54 branch head.
   //
   // The cost is that the suite is ambient-sensitive here
-  // (`REST_CANONICAL_ROUTES=false pnpm test` fails), but it fails LOUDLY, so
-  // there is no false green. Closing #43 for any of the three keys needs
-  // subprocess-based env isolation this repo does not have; any fix must keep a
-  // live assertion on this default.
+  // (`REST_CANONICAL_ROUTES=false pnpm test` => 32 pass / 2 fail), but it fails
+  // LOUDLY, so there is no false green. Closing #43 for any of the three keys
+  // needs subprocess-based env isolation this repo does not have; any fix must
+  // keep a live assertion on this default.
   canonicalRoutes: REST_CANONICAL_ROUTES !== 'false',
 
   enableHealthCheck: REST_HEALTH_CHECK_DISABLE !== 'true',
