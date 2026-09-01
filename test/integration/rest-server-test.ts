@@ -1,10 +1,70 @@
 import QUnit from "qunit";
+import net from "net";
 import RestServer from "@stonyx/rest-server";
 import config from "stonyx/config";
 import { setupIntegrationTests } from "stonyx/test-helpers";
 
 const { module, test } = QUnit;
 let endpoint: string;
+
+interface RawResponse {
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+}
+
+// Issues one HTTP/1.1 request with the request target written VERBATIM onto the
+// wire, and returns the parsed status line, headers and body.
+//
+// This exists because `fetch` cannot express the targets abofs/stonyx-rest-server#54
+// is about. Measured: `fetch` normalises dot-segments (`/admin/.` -> `/admin/`)
+// and has no API at all for an absolute-form request target
+// (`GET http://host/admin HTTP/1.1`, RFC 9112 3.2.2). Both are exactly the
+// strings the fix has to reject, so a `fetch`-based probe of them passes on
+// unfixed code. Do not "simplify" this helper back to `fetch`.
+//
+// `Connection: close` so the server ends the socket and the body is complete on
+// 'end' without needing chunked/Content-Length handling.
+function rawRequest(target: string, port: number | string): Promise<RawResponse> {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(Number(port), '127.0.0.1', () => {
+      socket.write(`GET ${target} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`);
+    });
+
+    let raw = '';
+    socket.setEncoding('utf8');
+    socket.on('data', chunk => { raw += chunk; });
+    socket.on('error', reject);
+    socket.on('end', () => {
+      const separator = raw.indexOf('\r\n\r\n');
+      const head = raw.slice(0, separator === -1 ? raw.length : separator);
+      const body = separator === -1 ? '' : raw.slice(separator + 4);
+      const [statusLine, ...headerLines] = head.split('\r\n');
+
+      const headers: Record<string, string> = {};
+      for (const line of headerLines) {
+        const index = line.indexOf(':');
+        if (index === -1) continue;
+        headers[line.slice(0, index).trim().toLowerCase()] = line.slice(index + 1).trim();
+      }
+
+      resolve({ status: Number(statusLine!.split(' ')[1]), headers, body });
+    });
+  });
+}
+
+// The observable shape of a 404, minus the fields that legitimately differ
+// between two different targets (date, content-length -- the bodies echo the
+// target). Used to assert a #54 rejection is indistinguishable from a genuine
+// miss; `res.sendStatus(404)` answers `text/plain` here and turns that red.
+function shapeOf({ status, headers }: RawResponse) {
+  return {
+    status,
+    contentType: headers['content-type'],
+    csp: headers['content-security-policy'],
+    nosniff: headers['x-content-type-options']
+  };
+}
 
 // Driven by sample requests defined in test/sample-requests
 module('[Integration] Rest Server', function(hooks) {
@@ -291,20 +351,194 @@ module('[Integration] Rest Server', function(hooks) {
       assert.equal(health.status, 200, 'GET /health still 200');
 
       // Documented invariant of the SETTING, and a regression guard rather
-      // than evidence: no mutation of this fix can turn it red. The mount
-      // segment's trailing slash cannot be closed by an express setting -- for
-      // both /public and /public/ the mounted sub-app receives
-      // req.path === '/', so a req.path-based auth hook sees no difference and
-      // there is nothing for strict routing to reject. Measured 200 under all
-      // four flag combinations.
+      // than evidence: no mutation of #50's fix can turn it red. For both
+      // /public and /public/ the mounted sub-app receives req.path === '/', so
+      // a req.path-based auth hook sees no difference and there is nothing for
+      // `strict routing` to reject. Measured 200 under all four combinations of
+      // the two SETTINGS, and that is still true -- it is still the reason
+      // applyRouteMatching() is not the fix site for this edge.
       //
-      // This is NOT a statement that the edge is closed or unclosable. The
-      // residual is req.originalUrl, which DOES differ, and an originalUrl auth
-      // hook is bypassed by it. Closing that is tracked as #54 -- see README
-      // and docs/project-structure.md. Do not "fix" it by changing this
-      // assertion.
+      // WHAT CHANGED, and why this assertion moved from 200 to 404
+      // (abofs/stonyx-rest-server#54): the outcome is no longer decided by the
+      // settings at all. `shouldRejectTarget()` in src/route-matching.ts runs
+      // per request, ahead of the auth hook, and rejects a raw target that is
+      // not the canonical path express matched. The residual the earlier
+      // version of this comment described -- req.originalUrl DOES differ, and
+      // an originalUrl hook was bypassed by one character -- is closed there.
+      //
+      // The previous instruction here was "do not 'fix' it by changing this
+      // assertion", and that was correct for as long as the only mechanism on
+      // the table was an express setting. It is superseded by #54, deliberately
+      // and in the same change that closes the edge. It still stands as
+      // written for the SETTINGS: do not change this line back on the theory
+      // that `strict routing` should have covered it. It never could. The
+      // module-level check is what covers it, and the assertion that this 404
+      // is produced by the CHECK and not by the settings lives in
+      // 'canonical request target (#54)' AC1.6 below, on a route class with no
+      // auth hook.
       const mountRoot = await fetch(`${endpoint}/public/`);
-      assert.equal(mountRoot.status, 200, 'GET /public/ stays 200 — the mount-segment slash is not closed by strict routing');
+      assert.equal(mountRoot.status, 404, 'GET /public/ is rejected by the canonical-target check (#54) — not by strict routing, which cannot see it');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // abofs/stonyx-rest-server#54 - canonical request target
+  //
+  // Every probe in this module is issued over a RAW TCP SOCKET, never `fetch`.
+  // That is a measured requirement, not a style preference:
+  //
+  //   target /admin/.            fetch -> server sees "/admin/"   raw -> "/admin/."
+  //   target http://HOST/admin   fetch -> cannot be emitted at all
+  //
+  // `fetch` normalises dot-segments and has no way to put an absolute-form
+  // request target on the wire, so assertions 3 and 4 below are structurally
+  // invisible to it -- written with `fetch` they would pass on unfixed code.
+  //
+  // Pre-fix reproduction, measured by raw socket on `origin/dev` @ f5c9a24 with
+  // this same fixture, all four unauthenticated 200s with the guarded handler
+  // body:
+  //
+  //   GET /admin                        -> 401  (hook fires)
+  //   GET /admin/                       -> 200  {"data":"GUARDED-ROOT-HANDLER-RAN"}
+  //   GET http://HOST/admin             -> 200  {"data":"GUARDED-ROOT-HANDLER-RAN"}
+  //   GET http://HOST/admin/settings    -> 200  {"data":"GUARDED-SETTINGS-HANDLER-RAN"}
+  // ---------------------------------------------------------------------------
+  module('canonical request target (#54)', function() {
+    test('AC1 - the originalUrl bypass is closed on both vectors, and routing is not broken', async function(assert) {
+      const { port } = config.restServer;
+
+      // -- vector 1: the mount-root trailing slash -----------------------------
+      const mountRootSlash = await rawRequest('/admin/', port);
+      assert.equal(mountRootSlash.status, 404, '1. GET /admin/ is rejected');
+      assert.notOk(mountRootSlash.body.includes('GUARDED-ROOT-HANDLER-RAN'), '1. GET /admin/ does not return the guarded handler body');
+
+      // This assertion does NOT show that the query is stripped rather than
+      // compared: `/admin/` is non-canonical either way, so removing
+      // `.split('?')[0]` from src/route-matching.ts leaves it green (measured).
+      // The stripping claim is carried by assertion 8 (`GET /admin?x=1` -> 401),
+      // which that mutation turns red. Do not delete 8 as redundant with this.
+      const mountRootSlashQuery = await rawRequest('/admin/?x=1', port);
+      assert.equal(mountRootSlashQuery.status, 404, '2. GET /admin/?x=1 is rejected - a query string does not exempt a non-canonical target');
+
+      // -- vector 2: the absolute-form request target (RFC 9112 3.2.2) ---------
+      // Hits EVERY route, not just the mount root, which is why 4 probes a
+      // sub-path. An implementation built on `new URL(originalUrl).pathname`
+      // passes 1 and 2 and fails exactly these two.
+      const absoluteRoot = await rawRequest(`http://127.0.0.1:${port}/admin`, port);
+      assert.equal(absoluteRoot.status, 404, '3. GET http://HOST/admin (absolute-form) is rejected');
+      assert.notOk(absoluteRoot.body.includes('GUARDED-ROOT-HANDLER-RAN'), '3. the absolute-form target does not return the guarded handler body');
+
+      const absoluteSubPath = await rawRequest(`http://127.0.0.1:${port}/admin/settings`, port);
+      assert.equal(absoluteSubPath.status, 404, '4. GET http://HOST/admin/settings (absolute-form, sub-path) is rejected');
+      assert.notOk(absoluteSubPath.body.includes('GUARDED-SETTINGS-HANDLER-RAN'), '4. the absolute-form sub-path does not return the guarded handler body');
+
+      // -- no oracle ----------------------------------------------------------
+      // A rejection must be shape-identical to a genuine miss. Measured:
+      // res.sendStatus(404) answers `text/plain "Not Found"` while finalhandler
+      // answers `text/html <pre>Cannot GET ...</pre>` with a CSP header -- a
+      // working oracle telling an attacker the route exists but was spelled
+      // wrong. next('router') produces the second shape. Content-Length is
+      // excluded because the two bodies echo different targets.
+      const genuineMiss = await rawRequest('/admin/genuinely-missing', port);
+      assert.equal(genuineMiss.status, 404, '5. precondition: a genuine miss under /admin is a 404');
+      assert.deepEqual(
+        shapeOf(mountRootSlash),
+        shapeOf(genuineMiss),
+        '5. the rejection is indistinguishable from a genuine miss (status, content-type, CSP, nosniff)'
+      );
+      assert.deepEqual(shapeOf(absoluteRoot), shapeOf(genuineMiss), '5. the absolute-form rejection is indistinguishable too');
+
+      // -- not gated on `this.auth` -------------------------------------------
+      // public.ts has NO auth hook. Gating the check inside `if (this.auth)`
+      // leaves this at 200 while every assertion above stays green, which is
+      // the whole reason this probe is separate. This assertion is also the
+      // deliberate reversal of #50's documented `/public/` -> 200 invariant.
+      const unguardedMountRoot = await rawRequest('/public/', port);
+      assert.equal(unguardedMountRoot.status, 404, '6. GET /public/ is rejected on a route class with no auth hook');
+      assert.notOk(unguardedMountRoot.body.includes('"data":"foo"'), '6. GET /public/ does not return the index handler body');
+
+      // -- negative controls: the hook still fires on canonical targets --------
+      const canonicalRoot = await rawRequest('/admin', port);
+      assert.equal(canonicalRoot.status, 401, '7. GET /admin still reaches the auth hook and is denied');
+
+      const canonicalSubPath = await rawRequest('/admin/settings', port);
+      assert.equal(canonicalSubPath.status, 401, '8. GET /admin/settings still reaches the auth hook and is denied');
+
+      // A query string on a CANONICAL path is permitted through to the hook.
+      // This is the other half of assertion 2: the predicate strips the query
+      // rather than rejecting on it, and that must not turn into a bypass.
+      const canonicalRootQuery = await rawRequest('/admin?x=1', port);
+      assert.equal(canonicalRootQuery.status, 401, '8. GET /admin?x=1 still reaches the auth hook and is denied');
+
+      const canonicalSubPathQuery = await rawRequest('/admin/settings?y=2', port);
+      assert.equal(canonicalSubPathQuery.status, 401, '8. GET /admin/settings?y=2 still reaches the auth hook and is denied');
+
+      // -- negative controls: routing is not broken ---------------------------
+      const publicIndex = await rawRequest('/public', port);
+      assert.equal(publicIndex.status, 200, '9. GET /public still 200');
+      assert.equal(publicIndex.body, '{"data":"foo"}', '9. GET /public still returns the index handler body');
+
+      const publicSuccess = await rawRequest('/public/success', port);
+      assert.equal(publicSuccess.status, 200, '9. GET /public/success still 200');
+      assert.equal(publicSuccess.body, 'OK', '9. GET /public/success still returns the default OK body');
+
+      const publicParams = await rawRequest('/public/url-params/foo/bar/baz', port);
+      assert.equal(publicParams.status, 200, '9. GET /public/url-params/foo/bar/baz still 200');
+      assert.deepEqual(JSON.parse(publicParams.body), { x: 'foo', y: 'bar', z: 'baz' }, '9. params still resolve');
+
+      const privateSuccess = await rawRequest('/private/success', port);
+      assert.equal(privateSuccess.status, 200, '9. GET /private/success still 200');
+
+      const privateFailure = await rawRequest('/private/failure', port);
+      assert.equal(privateFailure.status, 505, '9. the /private auth hook still rejects GET /private/failure');
+
+      const health = await rawRequest('/health', port);
+      assert.equal(health.status, 200, '9. GET /health still 200');
+
+      // -- negative control: a legitimately-registered trailing slash survives --
+      // admin.ts registers '/legacy/' WITH the slash, so its canonical target
+      // carries one. A blanket `target.endsWith('/')` rule 404s this consumer.
+      const legacy = await rawRequest('/admin/legacy/', port);
+      assert.equal(legacy.status, 200, '10. a route registered with a literal trailing slash still matches at its registered spelling');
+      assert.equal(legacy.body, '{"data":"LEGACY-HANDLER-RAN"}', '10. and it reaches its own handler');
+
+      // -- the check runs BEFORE the auth hook, not merely outside it ----------
+      // Assertion 6 covers only the `outside if (this.auth)` half of that
+      // property: it probes a class with NO hook, so it stays green if the
+      // check is merely moved BELOW the hook rather than gated on it. Measured
+      // on this branch before this assertion existed: move
+      // `if (shouldRejectTarget(req)) return next('router')` to just after the
+      // `if (this.auth)` block and the suite stays 34 pass / 0 fail, while
+      // `GET http://HOST/private/failure` answers 505 instead of 404.
+      //
+      // Two things break under that move, and this probe sees both:
+      //   - the ORACLE assertion 5 exists to prevent comes back by another
+      //     route -- an attacker sending an absolute-form target learns that
+      //     /private/failure exists and is guarded, because the hook's own
+      //     status is what answers;
+      //   - the consumer's `auth` hook RUNS on a request the module is about to
+      //     reject, so any hook with side effects (audit write, rate-limit
+      //     counter, session refresh, a decision stashed in `state`) fires on a
+      //     rejected request.
+      // private.ts's hook returns 505 for req.path === '/failure', which is
+      // what makes the difference observable from here.
+      const absGuarded = await rawRequest(`http://127.0.0.1:${port}/private/failure`, port);
+      assert.equal(absGuarded.status, 404, '11. the check runs BEFORE the auth hook - a guarded route does not answer with its hook status on a non-canonical target');
+      assert.deepEqual(shapeOf(absGuarded), shapeOf(genuineMiss), '11. and that rejection is still shape-identical to a genuine miss');
+
+      const canonicalGuarded = await rawRequest('/private/failure', port);
+      assert.equal(canonicalGuarded.status, 505, '11. precondition: the same hook still answers 505 on the CANONICAL target, so 404 above is the check and not a dead route');
+
+      // -- negative control: the index-mounted route class ---------------------
+      // `src/main.ts` maps a class named `index` to mount path '/', the one
+      // mount shape where `req.baseUrl` is ''. The `&& req.baseUrl` conjunct in
+      // shouldRejectTarget()'s canonical expression exists solely for it: drop
+      // the conjunct and `canonical` is '' while the raw target is '/', so the
+      // APPLICATION ROOT 404s. Measured before this assertion existed: shipped
+      // 200, conjunct dropped 404, suite 34 pass / 0 fail both ways.
+      const indexRoot = await rawRequest('/', port);
+      assert.equal(indexRoot.status, 200, '12. GET / still reaches the index-mounted route class, where req.baseUrl is the empty string');
+      assert.equal(indexRoot.body, '{"data":"INDEX-ROOT-RAN"}', '12. and it reaches its own handler');
     });
   });
 

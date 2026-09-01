@@ -5,6 +5,7 @@ declare module 'stonyx/config' {
     camelCaseRoutes?: boolean;
     caseSensitiveRoutes?: boolean;
     strictRoutes?: boolean;
+    canonicalRoutes?: boolean;
     enableHealthCheck?: boolean;
     origin?: string | string[];
     methods?: string[];
