@@ -65,6 +65,32 @@ toward the safe value), and there is one place where that rule sits beside every
 instance of it. What does **not** belong: anything that is neither a member of
 this family nor its consumer.
 
+**Split trigger for this file — normative, and a condition rather than a
+count.** Split it when the two lifetimes stop sharing their justification:
+when one group needs a guard-polarity rule, a timing contract, or a call site
+that the other group does not, so that the "one place anchors it" argument above
+stops covering both. Until that happens, keep them together no matter how many
+members each group has.
+
+Measure the cost of *not* splitting on **executable surface**, not on file
+length. Measured at #56's head: **319 lines, of which 24 are executable** — two
+imports, three signatures, two regexes and the bodies. Everything else is the
+prose that records why each guard is shaped the way it is. A split by lifetime
+therefore *relocates* ~295 lines of prose and produces two files of roughly a
+dozen executable lines each; it does not reduce anything. That is why a line
+count is the wrong trigger in both directions:
+
+- a fifth member that shares the polarity rule, the timing contract and the call
+  site adds ~4 executable lines and no navigational cost, and splitting for it
+  buys a reader nothing;
+- a member that shares none of them is worth splitting on the day it arrives
+  even if it is only the third.
+
+And if the *prose* is what makes the file hard to read, the answer is to move
+prose — this document is where the version-pinned citations already live — not
+to move code. A reader looking for the settings scrolling past two predicates is
+a table-of-contents problem, not a module-boundary one.
+
 > **The documented split trigger fired, and the split was deliberately not
 > taken. Recording that rather than editing the rule out.** The previous version
 > of this paragraph said *"Three is the documented family size; a fourth is the
@@ -79,12 +105,16 @@ this family nor its consumer.
 > upstream citations for no behavioural gain, on the day the file was being
 > reviewed for something else.
 >
-> **The trigger is not withdrawn, it is deferred, and it is now overdue.** A
-> *fifth* member splits this file by lifetime — `applyRouteMatching()` and the
-> two settings in one module, the per-request predicates in another — and
-> whoever adds it should not have to re-argue this. The cost of the deferral is
-> stated plainly: this file is now ~300 lines of which most is prose, and a
-> reader looking for the settings has to scroll past two predicates.
+> **Why the count was replaced rather than re-armed.** The deferred version of
+> this said a *fifth* member splits the file by lifetime. #58's fix round
+> retired that: a count re-arms a trigger that was never the real one, and it
+> would have been deferred again for the same reason it was deferred here — the
+> members still share one polarity rule, one timing contract and one call site,
+> which is the argument that makes them one file. The cost of the deferral is
+> still stated plainly, and it is a prose cost rather than a code one: 319
+> lines, 24 of them executable, and a reader looking for the settings scrolls
+> past two predicates. The normative condition above is what a future member is
+> tested against; this blockquote is only the history of how it got there.
 
 See [Case-sensitive routing (#47)](#case-sensitive-routing-47),
 [Strict routing (#50)](#strict-routing-50) and
@@ -480,18 +510,39 @@ settings. Read **per request**, inside the handler closure; no
 lazy-materialisation hazard, so do not move it into `applyRouteMatching()`.
 
 **Scope limit — and this one is the residual the fix cannot close.** The rule
-cannot give each decoded id exactly one accepted spelling, because reserved
-characters must remain encodable. Measured **after** the fix:
+rejects an over-encoded *unreserved* octet, so every octet **outside**
+`A-Za-z0-9-._~` stays encodable and any such octet whose hex carries a letter
+digit has two accepted spellings, upper- and lower-case hex. **The residual is
+therefore every reserved character, every non-ASCII byte and every control
+octet — scoping it to "reserved characters" understates it, and an i18n
+consumer reading the narrow wording concludes it does not apply to them.**
+Measured **after** the fix:
 
 ```
-GET /enc/a+b        -> 200  id "a+b"
-GET /enc/a%2Bb      -> 200  id "a+b"        <- two accepted spellings, ONE id
-GET /enc/sec%2fret  -> 200  id "sec/ret"
-GET /enc/sec%2Fret  -> 200  id "sec/ret"    <- hex-digit case, same id again
+GET /enc/a+b                  -> 200  id "a+b"
+GET /enc/a%2Bb                -> 200  id "a+b"      <- two accepted spellings, ONE id
+GET /enc/sec%2fret            -> 200  id "sec/ret"
+GET /enc/sec%2Fret            -> 200  id "sec/ret"  <- hex-digit case, same id again
+
+GET /i18n/caf%C3%A9           -> 401  hook denies this spelling
+GET /i18n/caf%c3%a9           -> 200  id "café"     <- same id, hook walked past
+GET /i18n/%E5%8C%97%E4%BA%AC  -> 401
+GET /i18n/%e5%8c%97%e4%ba%ac  -> 200  id "北京"
+GET /i18n/a%0Db               -> 401
+GET /i18n/a%0db               -> 200  id "a\rb"     <- a CONTROL octet, same aliasing
 ```
 
-So **a hook comparing a raw path string remains unsound for any id containing a
-reserved character, and `req.params` is the sound idiom.** `req.params` is
+The last six lines were measured on a deny list holding **no reserved character
+at all** (the three uppercase-hex spellings and nothing else), against the
+shipped `shouldRejectEncoding()` through a real listener. `src/route-matching.ts`
+already states the octet class correctly ("every RESERVED character and every
+non-ASCII octet stays encodable"); this section, `README.md` and
+`docs/agents/security-reviewer.md` were narrower than the source and are now
+matched to it.
+
+So **a hook comparing a raw path string remains unsound for any id carrying an
+octet outside `A-Za-z0-9-._~` — reserved characters, non-ASCII bytes and control
+octets alike — and `req.params` is the sound idiom.** `req.params` is
 decoded by express and is populated *before* `auth()` runs, by deliberate design
 (`src/request.ts`, *"Run auth after route matching so request.params is
 populated"*), and the existing integration test *Auth hook has access to

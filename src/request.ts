@@ -136,8 +136,22 @@ export default class Request {
           // `next('router')` rather than a sendStatus that answers `text/plain`
           // and becomes an oracle. They are killed here by
           // `test/integration/rest-server-test.ts` #56 AC1.4 (the shape
-          // deep-equal against a genuine miss) and AC1.5 (`/private/%66ailure`
-          // -> 404 rather than the hook's own status), on a class WITH a hook.
+          // deep-equal against a genuine miss) and AC1.6
+          // (`/private/restricte%64` -> 404 rather than the hook's own 403),
+          // on a class WITH a hook.
+          //
+          // AC1.6, NOT AC1.5, and the difference is measured rather than
+          // reasoned. This comment named AC1.5 (`/private/%66ailure`) until
+          // #58's fix round; that assertion CANNOT fail for the relocation.
+          // For that request `private.ts`'s hook sees `req.path === '/%66ailure'`
+          // (no 505) and `req.params.id === 'failure'` (no 403), so it returns
+          // undefined and the relocated check still fires. Only
+          // `/private/restricte%64` trips a hook clause -- `req.params.id` is
+          // DECODED by express, so it equals `restricted` and answers 403 --
+          // which is what makes AC1.6 the assertion that reds. Measured: move
+          // this line below the `if (this.auth)` block, rebuild, and the suite
+          // reports 40 pass / 1 fail, the single failure being #56's AC1 with
+          // both of assertion 6's messages red and assertion 5 GREEN.
           if (shouldRejectEncoding(req)) return next('router');
 
           // Run auth after route matching so request.params is populated

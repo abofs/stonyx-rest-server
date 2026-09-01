@@ -82,14 +82,21 @@ Configuration is read from `stonyx/config` under `restServer`:
 | `caseSensitiveRoutes` | **Boolean**   | `true`      | Match route paths case-sensitively. Disable via `REST_CASE_SENSITIVE_ROUTES=false`. See [Route Matching Strictness](#route-matching-strictness) — **disabling this re-opens a security hole**. |
 | `strictRoutes`    | **Boolean**   | `true`      | Match route paths strictly, so a trailing slash does not match a route registered without one. Disable via `REST_STRICT_ROUTES=false`. See [Route Matching Strictness](#route-matching-strictness) — **disabling this re-opens a security hole**, and note `GET /health/` now 404s. |
 | `canonicalRoutes` | **Boolean**   | `true`      | Reject a request whose raw target is not the canonical path express matched, before your `auth` hook runs. Disable via `REST_CANONICAL_ROUTES=false`. See [Route Matching Strictness](#route-matching-strictness) — **disabling this re-opens a security hole**, and note `GET /route/` at a mount root and every absolute-form request target now 404 on the routes this module registers (see the scope limit under [Upgrading](#upgrading-behaviour-changes)). |
-| `canonicalEncoding` | **Boolean**   | `true`      | Reject a request whose raw target percent-encodes an RFC 3986 §2.3 *unreserved* character (`A-Z a-z 0-9 - . _ ~`), before your `auth` hook runs. Disable via `REST_CANONICAL_ENCODING=false`. See [Route Matching Strictness](#route-matching-strictness) — **disabling this re-opens a security hole**, and note that a client over-encoding an unreserved character in a path now gets 404 (see [Upgrading](#upgrading-behaviour-changes)). |
+| `canonicalEncoding` | **Boolean**   | `true`      | Reject a request whose raw target percent-encodes an RFC 3986 §2.3 *unreserved* character (`A-Z a-z 0-9 - . _ ~`), before your `auth` hook runs. Disable via `REST_CANONICAL_ENCODING=false`. See [Route Matching Strictness](#route-matching-strictness) — **disabling this re-opens a security hole**, and note that a client over-encoding an unreserved character in a path now gets 404 (see [Upgrading](#upgrading-behaviour-changes)). Like `canonicalRoutes` this is a **registration-site** control, not a global one: the check runs in the handlers mounted from your request classes, so a route registered directly on `RestServer.instance.api` gets none of it — measured, `GET /direct/%73ecret` → **200** with `id "secret"` while `GET /enc/%73ecret` → 404. |
 |  `trustProxy`   |     **Boolean**     | `false`     | Trust reverse proxy headers (e.g. `X-Forwarded-Proto`). Enable via `REST_TRUST_PROXY=true` when running behind a load balancer such as AWS ALB/ELB to ensure correct protocol detection. |
 |    `statusMap`    |      **Object**     | `{}`        | Optional mapping of HTTP status codes to custom messages   |
 
 ### Route Matching Strictness
 
-Routes match **case-sensitively, strictly, only at their canonical target, and
-only at their canonical spelling by default**. Four controls, all on:
+Routes match **case-sensitively, strictly, and only at their canonical target**
+by default, and a raw target that percent-encodes an RFC 3986 §2.3 *unreserved*
+character is rejected. Four controls, all on.
+
+Note what that does **not** say. It is not "one accepted spelling per id", and
+this module cannot give you that: reserved characters, non-ASCII bytes and
+control octets all stay encodable, and every one of them whose hex carries a
+letter digit aliases by hex-digit case. The residual is stated and measured
+below, under [the residual](#the-residual-stated-plainly).
 
 | axis | control | example that no longer matches |
 |---|---|---|
@@ -246,19 +253,39 @@ segments and denies a request the router routed somewhere else entirely. And a
 hook that decodes *until stable* denies line three, which is a legitimately
 distinct id.
 
-**The residual, stated plainly: this does not give each id one spelling.**
-Because reserved characters must stay encodable, two different raw targets can
-still name the same record:
+#### The residual, stated plainly
+
+**This does not give each id one spelling.** The rule rejects an over-encoded
+*unreserved* octet, which means every octet **outside** `A-Za-z0-9-._~` stays
+encodable — and any such octet whose hex carries a letter digit therefore has
+two accepted spellings, upper- and lower-case hex. **That is every reserved
+character, every non-ASCII byte, and every control octet — not only the
+reserved ones.** Two different raw targets can still name the same record:
 
 ```
-GET /enc/a+b        -> 200  id "a+b"
-GET /enc/a%2Bb      -> 200  id "a+b"       <- two accepted spellings, one id
-GET /enc/sec%2fret  -> 200  id "sec/ret"
-GET /enc/sec%2Fret  -> 200  id "sec/ret"   <- hex-digit case, same id again
+GET /enc/a+b                  -> 200  id "a+b"
+GET /enc/a%2Bb                -> 200  id "a+b"      <- two accepted spellings, one id
+GET /enc/sec%2fret            -> 200  id "sec/ret"
+GET /enc/sec%2Fret            -> 200  id "sec/ret"  <- hex-digit case, same id again
+
+GET /i18n/caf%C3%A9           -> 401  hook denies this spelling
+GET /i18n/caf%c3%a9           -> 200  id "café"     <- same id, hook walked past
+GET /i18n/%E5%8C%97%E4%BA%AC  -> 401
+GET /i18n/%e5%8c%97%e4%ba%ac  -> 200  id "北京"
+GET /i18n/a%0Db               -> 401
+GET /i18n/a%0db               -> 200  id "a\rb"     <- a CONTROL octet, same aliasing
 ```
 
-**So a hook comparing a raw path string is still unsound for any id containing a
-reserved character, and `req.params` is the sound comparison.** `req.params` is
+The last six lines were measured against this module's shipped predicate on a
+deny list holding **no reserved character at all** — the three uppercase-hex
+spellings, nothing else. If your ids are i18n text, or anything else that is not
+pure `A-Za-z0-9-._~`, the residual applies to you. Reading it as "only affects
+ids with a `/` or a `+` in them" is the mistake this paragraph exists to
+prevent.
+
+**So a hook comparing a raw path string is still unsound for any id carrying an
+octet outside `A-Za-z0-9-._~` — reserved characters, non-ASCII bytes and control
+octets alike — and `req.params` is the sound comparison.** `req.params` is
 decoded by express and is populated *before* your `auth` hook runs, by design —
 compare that, and none of this applies to you. This module cannot close the
 residual for you without 404ing encodings clients are entitled to send; see

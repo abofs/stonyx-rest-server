@@ -264,14 +264,39 @@ const PERCENT_TRIPLET = /%([0-9A-Fa-f]{2})/g;
  * own property separately.
  *
  * WHAT THIS DOES NOT CLOSE, stated here rather than left implied. It cannot
- * give each decoded id exactly one accepted spelling, because reserved
- * characters must remain encodable: `/enc/a+b` and `/enc/a%2Bb` both name the
- * id `a+b`, and `/enc/sec%2fret` and `/enc/sec%2Fret` both name `sec/ret`. So a
- * hook comparing a raw path string REMAINS UNSOUND for any id containing a
- * reserved character, and `req.params` -- which express decodes, and which is
- * populated before `auth()` runs -- is the sound idiom. That residual is the
- * consumer's comparison to own; the module cannot close it without 404ing
- * encodings clients are required to emit.
+ * give each decoded id exactly one accepted spelling, because everything the
+ * allowlist above does NOT cover must remain encodable: `/enc/a+b` and
+ * `/enc/a%2Bb` both name the id `a+b`, and `/enc/sec%2fret` and
+ * `/enc/sec%2Fret` both name `sec/ret`.
+ *
+ * THE RESIDUAL IS WIDER THAN "RESERVED CHARACTERS" AND MUST NOT BE WRITTEN
+ * DOWN THAT WAY. Any octet outside `[A-Za-z0-9-._~]` whose hex carries a letter
+ * digit aliases by hex-digit case, which is every reserved character AND every
+ * non-ASCII byte AND every control octet. Measured through a real listener
+ * against this predicate, on a deny list holding NO reserved character at all:
+ *
+ *   GET /i18n/caf%C3%A9          -> 401     GET /i18n/caf%c3%a9          -> 200, id "café"
+ *   GET /i18n/%E5%8C%97%E4%BA%AC -> 401     GET /i18n/%e5%8c%97%e4%ba%ac -> 200, id "北京"
+ *   GET /i18n/a%0Db              -> 401     GET /i18n/a%0db              -> 200, id "a\rb"
+ *
+ * A consumer whose ids are i18n text reads "any id containing a reserved
+ * character" as not applying to them. It does. The three docs that carried the
+ * narrow wording (`README.md`, `docs/project-structure.md`,
+ * `docs/agents/security-reviewer.md`) were widened to this scope rather than
+ * this comment being narrowed to theirs.
+ *
+ * So a hook comparing a raw path string REMAINS UNSOUND for any id carrying an
+ * octet outside `[A-Za-z0-9-._~]`, and `req.params` -- which express decodes,
+ * and which is populated before `auth()` runs -- is the sound idiom. That
+ * residual is the consumer's comparison to own; the module cannot close it
+ * without 404ing encodings clients are required to emit.
+ *
+ * SCOPE LIMIT, separate from the residual above: this predicate is called from
+ * `Request.registerCalls()`, so it covers the routes mounted from request
+ * classes and nothing else. A route registered directly on the public
+ * `RestServer.instance.api` gets none of it -- measured,
+ * `GET /direct/%73ecret` -> 200 with `id "secret"` while `GET /enc/%73ecret`
+ * -> 404. Same registration-site limit `canonicalRoutes` (#54) has.
  */
 export function shouldRejectEncoding(req: ExpressRequest): boolean {
   // `!== false`, not `=== false` and not a truthy check: the polarity is the

@@ -38,6 +38,32 @@ function readRepoFile(relativePath: string): string {
   return readFileSync(join(REPO_ROOT, relativePath), 'utf8');
 }
 
+// Strips comments so assertion 4 asserts about CODE rather than about prose.
+//
+// This is the fix for a measured false red, not a tidy-up. Assertion 4
+// substring-matched the whole file, and `config/environment.js` invites a
+// back-pointer comment into `test/config/environment.ts` FOUR times ("do not
+// 'fix' this as part of #43", once per key). Measured on the #56 branch head:
+// appending the single line
+//
+//   // canonicalEncoding is deliberately NOT pinned here -- see config/environment.js
+//
+// to `test/config/environment.ts` reported 40 pass / 1 fail, the failure being
+// AC7 assertion 4 claiming a pin that does not exist. A guard that reds when
+// someone writes down WHY a key is unpinned is a guard that teaches people not
+// to write it down. `docs/framework/testing.md`: "a guard that reads raw source
+// must normalise before asserting".
+//
+// Block comments first, then whole-line `//`, then trailing `//`. The trailing
+// case requires whitespace before the `//` so a `://` inside a URL or a string
+// is left alone -- the file legitimately contains path literals.
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^[ \t]*\/\/.*$/gm, '')
+    .replace(/[ \t]+\/\/.*$/gm, '');
+}
+
 // The four security-relevant route-matching keys, all defaulting on, all
 // disable-able. Reviewed as a SET rather than key by key: `docs/framework/testing.md`
 // records that a pinned set has to be evaluated together, because a pin that is
@@ -78,15 +104,44 @@ module('[Unit] Config', function() {
     // 4. The key is NOT pinned in the test config, matching its three siblings.
     // Evaluated as a set: pinning ANY of the four re-creates the trap for that
     // key, so the assertion is on the whole family rather than on the new one.
-    const testEnvironment = readRepoFile('test/config/environment.ts');
+    //
+    // Asserted against the COMMENT-STRIPPED source. A pin is code; a
+    // back-pointer explaining why the key is unpinned is prose, and
+    // `config/environment.js` asks for exactly that prose four times. See
+    // stripComments() above for the measurement that forced this.
+    const testEnvironmentRaw = readRepoFile('test/config/environment.ts');
+    const testEnvironment = stripComments(testEnvironmentRaw);
     for (const key of ROUTE_MATCHING_KEYS) {
       assert.notOk(testEnvironment.includes(key), `4. ${key} is NOT pinned in test/config/environment.ts — pinning it hides an inverted shipped default (#43)`);
     }
 
+    // 4b. POSITIVE CONTROL FOR THE NORMALISATION ITSELF, and the reason 4 is
+    // not now vacuous in the other direction. A stripComments() that returned
+    // '' -- or that ate the code as well as the comments -- would satisfy every
+    // `notOk` above for the wrong reason. This probe carries a pin and a
+    // back-pointer naming the same key in all three comment shapes, and asserts
+    // the two are told apart.
+    const NORMALISATION_PROBE = [
+      '/* canonicalRoutes lives in config/environment.js */',
+      '// canonicalEncoding is deliberately NOT pinned here -- see config/environment.js',
+      "const config = { restServer: { dir: './test/sample/requests', docs: 'https://example.test/x' } }; // strictRoutes stays unpinned too",
+      '// caseSensitiveRoutes likewise'
+    ].join('\n');
+    const normalisedProbe = stripComments(NORMALISATION_PROBE);
+    for (const key of ROUTE_MATCHING_KEYS) {
+      assert.notOk(normalisedProbe.includes(key), `4b. normalisation control: a COMMENT naming ${key} is stripped, so assertion 4 cannot false-red on a back-pointer`);
+    }
+    assert.ok(normalisedProbe.includes('dir'), '4b. normalisation control: the CODE survives stripping, so assertion 4 would still see a real pin');
+    assert.ok(normalisedProbe.includes('https://example.test/x'), '4b. normalisation control: a `//` inside a string literal is not eaten as a trailing comment (the trailing rule requires whitespace before the `//`)');
+    assert.ok(stripComments('const canonicalEncoding = true;').includes('canonicalEncoding'), '4b. normalisation control: a bare pin with no comment at all is untouched');
+
     // 5. POSITIVE CONTROL for assertion 4, and the reason its four `notOk`s are
     // not vacuous. A typo in the path, a moved file, or a `readRepoFile` that
     // silently returned '' would satisfy every assertion above. `dir` IS pinned
-    // in that file, so this proves the same read reaches the same content.
+    // in that file, so this proves the same read reaches the same content --
+    // asserted on the STRIPPED text, so it also proves stripping did not empty
+    // the real file.
     assert.ok(testEnvironment.includes('dir'), '5. positive control: the same read of test/config/environment.ts DOES find the `dir` pin, so the four absences above mean absent and not unread');
+    assert.ok(testEnvironmentRaw.length > testEnvironment.length, '5. positive control: test/config/environment.ts does carry comments, so stripComments() had something to do and the assertions above are about its code');
   });
 });
