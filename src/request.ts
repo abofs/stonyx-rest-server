@@ -80,13 +80,24 @@ export default class Request {
           // bypasses against hooks that authorize on `req.originalUrl`: the
           // mount-root trailing slash and the absolute-form request target.
           //
-          // Two properties of this line are load-bearing, and each has its own
-          // red-able assertion:
+          // Three properties of this line are load-bearing. Each is named with
+          // the ONE assertion that turns red when it is removed -- assertion
+          // numbers in `test/integration/rest-server-test.ts` AC1, so the claim
+          // is checkable rather than a promise that coverage exists somewhere:
           //
-          //   1. It runs BEFORE auth, and OUTSIDE `if (this.auth)`. Gating it on
-          //      the hook would leave `GET /public/` at 200 and make a security
-          //      control depend on an unrelated consumer choice.
-          //   2. It rejects with `next('router')`, NOT sendStatusResponse() or
+          //   1. It runs OUTSIDE `if (this.auth)`. Gating it on the hook would
+          //      leave `GET /public/` at 200 and make a security control depend
+          //      on an unrelated consumer choice. Killed by AC1.6, which probes
+          //      a route class with no hook.
+          //   2. It runs BEFORE that block, not merely outside it. This is a
+          //      SEPARATE property from 1 and needs its own probe: AC1.6 is on
+          //      a hookless class, so it stays green if this line is merely
+          //      moved BELOW the block. Measured with it moved: the suite was
+          //      34 pass / 0 fail while `GET http://HOST/private/failure`
+          //      answered 505 -- the consumer's hook status, which is the same
+          //      oracle class as 3, and the hook itself ran on a request this
+          //      module was about to reject. Killed by AC1.11.
+          //   3. It rejects with `next('router')`, NOT sendStatusResponse() or
           //      res.sendStatus(404). Measured: sendStatus returns
           //      `text/plain "Not Found"` while a genuine miss returns
           //      `text/html <pre>Cannot GET ...</pre>` -- a working ORACLE
@@ -96,6 +107,11 @@ export default class Request {
           //      Content-Type, same CSP header). Routing it through
           //      sendStatusResponse() would additionally re-introduce the
           //      oracle for any consumer who sets a 404 in `statusMap`.
+          //      Killed by AC1.5.
+          //
+          // Properties 1 and 2 were previously stated here as a single item
+          // asserted to have "its own red-able assertion". It did not: only
+          // half of it was covered. Do not re-merge them.
           if (shouldRejectTarget(req)) return next('router');
 
           // Run auth after route matching so request.params is populated

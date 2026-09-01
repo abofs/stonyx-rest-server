@@ -128,7 +128,9 @@ export default function applyRouteMatching(api: Express): void {
  * hazard here, so do not carry that constraint across.
  *
  * The caller must reject with `next('router')`, NOT `res.sendStatus(404)`, and
- * must run this whether or not `this.auth` is set -- see src/request.ts.
+ * must run this BEFORE `this.auth` as well as outside `if (this.auth)` -- those
+ * are two separate properties with two separate assertions (AC1.11 and AC1.6);
+ * see src/request.ts.
  *
  * Guard polarity is `!== false`, matching both siblings, for the same measured
  * reason: the secure value is the TRUTHY one, so a plain truthy check fails
@@ -157,6 +159,14 @@ export function shouldRejectTarget(req: ExpressRequest): boolean {
 
   // At a mount root express reports `req.path === '/'` while the canonical
   // target is the bare mount segment, so the two are not simply concatenated.
+  //
+  // `&& req.baseUrl` is load-bearing and is NOT a redundant truthiness guard.
+  // A route class named `index` mounts at '/' (src/main.ts `mountRoute()`),
+  // and that is the one mount shape where `req.baseUrl` is ''. Without the
+  // conjunct, `GET /` compares the raw target '/' against a canonical of '' and
+  // the APPLICATION ROOT is rejected. Measured before it had a guard: shipped
+  // `GET /` -> 200, conjunct dropped -> 404, suite 34 pass / 0 fail BOTH ways.
+  // Killed now by AC1.12, against `test/sample/requests/index.ts`.
   const canonical = req.path === '/' && req.baseUrl ? req.baseUrl : req.baseUrl + req.path;
 
   return target !== canonical;

@@ -412,8 +412,13 @@ module('[Integration] Rest Server', function(hooks) {
       assert.equal(mountRootSlash.status, 404, '1. GET /admin/ is rejected');
       assert.notOk(mountRootSlash.body.includes('GUARDED-ROOT-HANDLER-RAN'), '1. GET /admin/ does not return the guarded handler body');
 
+      // This assertion does NOT show that the query is stripped rather than
+      // compared: `/admin/` is non-canonical either way, so removing
+      // `.split('?')[0]` from src/route-matching.ts leaves it green (measured).
+      // The stripping claim is carried by assertion 8 (`GET /admin?x=1` -> 401),
+      // which that mutation turns red. Do not delete 8 as redundant with this.
       const mountRootSlashQuery = await rawRequest('/admin/?x=1', port);
-      assert.equal(mountRootSlashQuery.status, 404, '2. GET /admin/?x=1 is rejected - the query is stripped before comparison, not compared');
+      assert.equal(mountRootSlashQuery.status, 404, '2. GET /admin/?x=1 is rejected - a query string does not exempt a non-canonical target');
 
       // -- vector 2: the absolute-form request target (RFC 9112 3.2.2) ---------
       // Hits EVERY route, not just the mount root, which is why 4 probes a
@@ -496,6 +501,44 @@ module('[Integration] Rest Server', function(hooks) {
       const legacy = await rawRequest('/admin/legacy/', port);
       assert.equal(legacy.status, 200, '10. a route registered with a literal trailing slash still matches at its registered spelling');
       assert.equal(legacy.body, '{"data":"LEGACY-HANDLER-RAN"}', '10. and it reaches its own handler');
+
+      // -- the check runs BEFORE the auth hook, not merely outside it ----------
+      // Assertion 6 covers only the `outside if (this.auth)` half of that
+      // property: it probes a class with NO hook, so it stays green if the
+      // check is merely moved BELOW the hook rather than gated on it. Measured
+      // on this branch before this assertion existed: move
+      // `if (shouldRejectTarget(req)) return next('router')` to just after the
+      // `if (this.auth)` block and the suite stays 34 pass / 0 fail, while
+      // `GET http://HOST/private/failure` answers 505 instead of 404.
+      //
+      // Two things break under that move, and this probe sees both:
+      //   - the ORACLE assertion 5 exists to prevent comes back by another
+      //     route -- an attacker sending an absolute-form target learns that
+      //     /private/failure exists and is guarded, because the hook's own
+      //     status is what answers;
+      //   - the consumer's `auth` hook RUNS on a request the module is about to
+      //     reject, so any hook with side effects (audit write, rate-limit
+      //     counter, session refresh, a decision stashed in `state`) fires on a
+      //     rejected request.
+      // private.ts's hook returns 505 for req.path === '/failure', which is
+      // what makes the difference observable from here.
+      const absGuarded = await rawRequest(`http://127.0.0.1:${port}/private/failure`, port);
+      assert.equal(absGuarded.status, 404, '11. the check runs BEFORE the auth hook - a guarded route does not answer with its hook status on a non-canonical target');
+      assert.deepEqual(shapeOf(absGuarded), shapeOf(genuineMiss), '11. and that rejection is still shape-identical to a genuine miss');
+
+      const canonicalGuarded = await rawRequest('/private/failure', port);
+      assert.equal(canonicalGuarded.status, 505, '11. precondition: the same hook still answers 505 on the CANONICAL target, so 404 above is the check and not a dead route');
+
+      // -- negative control: the index-mounted route class ---------------------
+      // `src/main.ts` maps a class named `index` to mount path '/', the one
+      // mount shape where `req.baseUrl` is ''. The `&& req.baseUrl` conjunct in
+      // shouldRejectTarget()'s canonical expression exists solely for it: drop
+      // the conjunct and `canonical` is '' while the raw target is '/', so the
+      // APPLICATION ROOT 404s. Measured before this assertion existed: shipped
+      // 200, conjunct dropped 404, suite 34 pass / 0 fail both ways.
+      const indexRoot = await rawRequest('/', port);
+      assert.equal(indexRoot.status, 200, '12. GET / still reaches the index-mounted route class, where req.baseUrl is the empty string');
+      assert.equal(indexRoot.body, '{"data":"INDEX-ROOT-RAN"}', '12. and it reaches its own handler');
     });
   });
 

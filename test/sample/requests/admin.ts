@@ -46,7 +46,7 @@ export default class AdminRequest extends Request {
   };
 
   auth = (request: ExpressRequest, _state: RequestState): number | undefined => {
-    if (PROTECTED.has(request.originalUrl.split('?')[0]!)) return 401;
+    if (PROTECTED.has(request.originalUrl.split('?')[0])) return 401;
     return undefined;
   };
 }
