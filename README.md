@@ -82,24 +82,27 @@ Configuration is read from `stonyx/config` under `restServer`:
 | `caseSensitiveRoutes` | **Boolean**   | `true`      | Match route paths case-sensitively. Disable via `REST_CASE_SENSITIVE_ROUTES=false`. See [Route Matching Strictness](#route-matching-strictness) — **disabling this re-opens a security hole**. |
 | `strictRoutes`    | **Boolean**   | `true`      | Match route paths strictly, so a trailing slash does not match a route registered without one. Disable via `REST_STRICT_ROUTES=false`. See [Route Matching Strictness](#route-matching-strictness) — **disabling this re-opens a security hole**, and note `GET /health/` now 404s. |
 | `canonicalRoutes` | **Boolean**   | `true`      | Reject a request whose raw target is not the canonical path express matched, before your `auth` hook runs. Disable via `REST_CANONICAL_ROUTES=false`. See [Route Matching Strictness](#route-matching-strictness) — **disabling this re-opens a security hole**, and note `GET /route/` at a mount root and every absolute-form request target now 404 on the routes this module registers (see the scope limit under [Upgrading](#upgrading-behaviour-changes)). |
+| `canonicalEncoding` | **Boolean**   | `true`      | Reject a request whose raw target percent-encodes an RFC 3986 §2.3 *unreserved* character (`A-Z a-z 0-9 - . _ ~`), before your `auth` hook runs. Disable via `REST_CANONICAL_ENCODING=false`. See [Route Matching Strictness](#route-matching-strictness) — **disabling this re-opens a security hole**, and note that a client over-encoding an unreserved character in a path now gets 404 (see [Upgrading](#upgrading-behaviour-changes)). |
 |  `trustProxy`   |     **Boolean**     | `false`     | Trust reverse proxy headers (e.g. `X-Forwarded-Proto`). Enable via `REST_TRUST_PROXY=true` when running behind a load balancer such as AWS ALB/ELB to ensure correct protocol detection. |
 |    `statusMap`    |      **Object**     | `{}`        | Optional mapping of HTTP status codes to custom messages   |
 
 ### Route Matching Strictness
 
-Routes match **case-sensitively, strictly, and only at their canonical target
-by default**. Three controls, all on:
+Routes match **case-sensitively, strictly, only at their canonical target, and
+only at their canonical spelling by default**. Four controls, all on:
 
 | axis | control | example that no longer matches |
 |---|---|---|
 | casing | `case sensitive routing` (setting) | `GET /users/Success` -> does not reach `/success` |
 | trailing slash | `strict routing` (setting) | `GET /users/success/` -> does not reach `/success` |
 | canonical target | `canonicalRoutes` (per-request check) | `GET /users/` and `GET http://host/users` -> do not reach the mounted `/users` class |
+| percent-encoding | `canonicalEncoding` (per-request check) | `GET /users/%73ecret` -> does not reach `/users/:id` with `id === "secret"` |
 
-The first two are express settings applied at both construction sites. The
-third is **not a setting** — no express setting can express it — it is a
-per-request comparison of the raw request target against the path express
-matched, run ahead of your `auth` hook. See
+The first two are express settings applied at both construction sites. The last
+two are **not settings** — no express setting can express either — they are
+per-request checks run ahead of your `auth` hook: one compares the raw request
+target against the path express matched, the other rejects a raw target that
+percent-encodes a character which never needs encoding. See
 [`src/route-matching.ts`](src/route-matching.ts).
 
 Read [What this does not do](#what-this-does-not-do) and
@@ -191,19 +194,75 @@ Routes registered *with* a literal trailing slash are unaffected — their
 canonical target carries the slash. So are index-mounted route classes and
 query strings on canonical paths.
 
-**Param routes: "unaffected" means "no regression", not "no residual".**
-`/resource/:id` keeps matching exactly as it did. But percent-encoding is not
-normalized on either side of the comparison — express decodes only
-`req.params`, not `req.path` and not `req.originalUrl` — so `target` and
-`canonical` are *both* the encoded string and this check passes the request
-through by construction. Measured on a hook that authorizes on
-`req.originalUrl` with the query correctly stripped, on a `/:id` route:
-`GET /enc/secret` → 401, `GET /enc/%73ecret` → **200 with the guarded handler
-running unauthenticated**, identically before and after this change. It is a
-residual, not something `canonicalRoutes` introduced, and it is **wider** than
-the two vectors above: `%73` defeats a `req.path` hook as well. Tracked as
-[#56](https://github.com/abofs/stonyx-rest-server/issues/56) — until it ships,
-do not read a param-segment route class as covered on this axis.
+**Param routes: "unaffected" means "no regression".** `/resource/:id` keeps
+matching exactly as it did. `canonicalRoutes` is structurally blind to how a
+param value is *spelled* — express decodes only `req.params`, so `target` and
+`canonical` are both the same encoded string and this comparison passes the
+request through by construction. That axis has its own control, below.
+
+#### The percent-encoding check (`canonicalEncoding`)
+
+Express decodes **`req.params` and nothing else**. `req.path` and
+`req.originalUrl` both stay percent-encoded, so an `auth` hook comparing either
+of them against a fixed string was walked past by re-spelling the id:
+
+```
+                          before   after
+GET /enc/secret             401      401   (hook fires, request blocked)
+GET /enc/%73ecret           200      404   (hook never fired; handler got id "secret")
+GET /enc/%73%65%63%72%65%74 200      404
+GET /private/%66ailure      200      404   (guard missed; absorbed by a sibling /:id)
+```
+
+`canonicalEncoding` closes it
+([#56](https://github.com/abofs/stonyx-rest-server/issues/56)). Before your
+`auth` hook runs, the query-stripped raw target is rejected as a plain 404 if it
+contains a percent-triplet whose octet is an
+[RFC 3986 §2.3](https://www.rfc-editor.org/rfc/rfc3986#section-2.3)
+**unreserved** character — `A-Z`, `a-z`, `0-9`, `-`, `.`, `_`, `~`. Those are
+exactly the characters a URI generator must **not** encode and a normalizer
+**must** decode, so nothing a client is required to send is affected.
+
+**This is not a list of spellings, it is a family.** For an id of *n* bytes
+there are `∏(1 + vᵢ) − 1` non-canonical spellings, where a byte whose hex
+carries a letter digit has two (`m`, `%6d`, `%6D`). Measured against unfixed
+code: **63 of 63** spellings of `secret` returned 200, and **71 of 71** of
+`admin`. Enumerating them in your own hook is not a remedy.
+
+**Three things it deliberately does not reject:**
+
+```
+GET /enc/sec%2fret   -> 200  id "sec/ret"    %2f is RESERVED — must stay encodable
+GET /enc/a%2Bb       -> 200  id "a+b"        %2B is RESERVED
+GET /enc/%2573ecret  -> 200  id "%73ecret"   express decodes exactly ONCE
+GET /enc/x?name=%61  -> 200  id "x"          the query string is stripped, not scanned
+GET /enc/%zz         -> 400                  malformed escapes are the router's 400, unchanged
+```
+
+If you were tempted to write `decodeURIComponent(req.path)` in your hook: the
+first line is why not. The router **splits then decodes**, so `sec%2fret` is one
+segment naming the id `sec/ret`; a hook that decodes then splits sees two
+segments and denies a request the router routed somewhere else entirely. And a
+hook that decodes *until stable* denies line three, which is a legitimately
+distinct id.
+
+**The residual, stated plainly: this does not give each id one spelling.**
+Because reserved characters must stay encodable, two different raw targets can
+still name the same record:
+
+```
+GET /enc/a+b        -> 200  id "a+b"
+GET /enc/a%2Bb      -> 200  id "a+b"       <- two accepted spellings, one id
+GET /enc/sec%2fret  -> 200  id "sec/ret"
+GET /enc/sec%2Fret  -> 200  id "sec/ret"   <- hex-digit case, same id again
+```
+
+**So a hook comparing a raw path string is still unsound for any id containing a
+reserved character, and `req.params` is the sound comparison.** `req.params` is
+decoded by express and is populated *before* your `auth` hook runs, by design —
+compare that, and none of this applies to you. This module cannot close the
+residual for you without 404ing encodings clients are entitled to send; see
+[Consumer Contracts](#consumer-contracts).
 
 #### What this does not do
 
@@ -234,8 +293,21 @@ another variant of the bug above.
 
 #### Upgrading: behaviour changes
 
-All three controls change which requests match, so all three are
+All four controls change which requests match, so all four are
 consumer-visible.
+
+**A client that over-encodes an unreserved character in a path now gets 404.**
+`GET /public/url-params/%61/b/c` returns **404** where it previously returned
+200 — measured on this repo's own fixture. `%61` is `a`, and
+[RFC 3986 §2.3](https://www.rfc-editor.org/rfc/rfc3986#section-2.3) says a
+generator must not encode it, so no correct client emits this. Some do anyway:
+over-eager `encodeURIComponent` on an id that never needed it, a URL builder
+that percent-encodes everything, or a client library normalizing in the wrong
+direction. Reserved characters are **unaffected** — `%2f`, `%2B`, `%25` and
+every non-ASCII byte still route, and so does anything in the query string.
+Remediation is `REST_CANONICAL_ENCODING=false`, or fix the client. Like the two
+below, the rejection is **indistinguishable from a route that was never
+registered**, and this module emits no request logging.
 
 **Clients or forward proxies sending absolute-form request targets now get 404
 on every route mounted from a request class.** `GET http://host/admin HTTP/1.1`
@@ -289,16 +361,17 @@ no log line and no stack, so it looks like a deploy that dropped a route.
 
 #### Opting out
 
-Three separate flags, one per axis:
+Four separate flags, one per axis:
 
 ```bash
 REST_CASE_SENSITIVE_ROUTES=false   # restores case-insensitive matching (#47)
 REST_STRICT_ROUTES=false           # restores trailing-slash tolerance (#50)
 REST_CANONICAL_ROUTES=false        # restores non-canonical request targets (#54)
+REST_CANONICAL_ENCODING=false      # restores percent-encoded spellings (#56)
 ```
 
 or equivalently
-`restServer: { caseSensitiveRoutes: false, strictRoutes: false, canonicalRoutes: false }`.
+`restServer: { caseSensitiveRoutes: false, strictRoutes: false, canonicalRoutes: false, canonicalEncoding: false }`.
 
 **They are deliberately separate keys, and none implies the others.** Slash
 tolerance is a legitimate need — a health-check URL you cannot change today is
@@ -314,6 +387,18 @@ configuration to run on. It re-opens both `#54` vectors at once — the mount-ro
 slash *and* the absolute-form target — against any hook authorizing on
 `req.originalUrl`. It is env-only, so restoring service does not need a
 redeploy; use it to stop the bleeding, then fix the client and remove it.
+
+**`REST_CANONICAL_ENCODING=false` re-opens the `#56` bypass, and it is the
+widest of the four.** With it set, `GET /users/%73ecret` reaches your `/:id`
+handler with `id === "secret"` while your hook compared `%73ecret` and did not
+match — and it does that against a hook comparing `req.path` **or**
+`req.originalUrl`, on every route class with a param segment. The other three
+flags each re-open one field's worth of exposure; this one re-opens both. It is
+also **independent** of `REST_CANONICAL_ROUTES`: if you have to set that one for
+an absolute-form-emitting forward proxy, you keep this one on, which is exactly
+why they are separate keys. If you must set it, the mitigation that costs you
+nothing is to compare `req.params` in your hook rather than a raw path string —
+`req.params` is decoded and was never exposed to this.
 
 **Each flag restores the corresponding vulnerability described above** — the
 URL-based authorization in your application becomes bypassable along that axis
@@ -331,7 +416,8 @@ rather than left implied by the sections above.
 | you must | because | symptom if you don't |
 |---|---|---|
 | **Strip the query string** before comparing `req.originalUrl` to a fixed path in an `auth` hook | `canonicalRoutes` compares the query-*stripped* target — a query string is a legitimately variable part of a request target, and rejecting on it would 404 every `?`-carrying request | `GET /admin?x=1` reaches your guarded handler **unauthenticated**, 200, no error, no log. Measured identical before and after `canonicalRoutes` |
-| **Compare param values with the same decoding and casing you look them up with** | express decodes only `req.params`; `req.path` and `req.originalUrl` both stay percent-encoded, and param *values* are never case-normalized | `GET /orders/%73ecret` runs the handler with `id === "secret"` while your hook compared `%73ecret` and did not match — unauthenticated 200. Tracked as [#56](https://github.com/abofs/stonyx-rest-server/issues/56) |
+| **Compare `req.params`, not a raw path string** | express decodes only `req.params`; `req.path` and `req.originalUrl` both stay percent-encoded. `canonicalEncoding` (#56) rejects an over-encoded *unreserved* character, but **reserved** characters must stay encodable, so one decoded id still has more than one accepted spelling: `GET /orders/a+b` and `GET /orders/a%2Bb` both run the handler with `id === "a+b"`, and `sec%2fret` / `sec%2Fret` both give `sec/ret` | your hook compares one spelling, the request arrives in another, and the handler runs **unauthenticated** — 200, no error, no log. Comparing `req.params.id` instead is immune by construction, and it is populated before `auth()` runs |
+| **Compare param values with the same casing you look them up with** | param *values* are never case-normalized, and record ids are legitimately case-sensitive | `GET /orders/SECRET` runs the handler with `id === "SECRET"` while your hook compared `secret`. Note that lower-casing the value is **not** the fix: it false-denies a genuinely distinct `SECRET` record and, measured in a sibling module, false-allowed an encoded spelling at the same time |
 | **Return `undefined` from `auth()` to mean "authorized"** — never `0` | any integer return is sent as the HTTP status | returning `0` sends a `0` status rather than allowing the request |
 
 `test/sample/requests/admin.ts` in this repo is the worked example of a

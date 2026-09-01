@@ -40,13 +40,37 @@ const NEVER_PASS = 'could never ' + 'pass';
 const OPEN = 'remains ' + 'open';
 const CLOSE_HERE = 'close it here';
 
+// #56's fragments, assembled for the same reason as the four above: this file
+// is tracked, so a literal copy of a retired phrasing here would be found by
+// the ledger's own grep and assertion 3 could never be satisfied.
+const LIVE = '**' + 'live**';
+const TRACKED = 'tracked as ' + '#56';
+const UNTIL_SHIPS = 'Until ' + '#56 ships';
+const TRACKED_LINK = 'Tracked as ' + '[#56]';
+const LIVE_RESIDUAL = 'live ' + 'residual';
+
 // ERE for `git grep -E`, and also valid as a JS RegExp source so assertions 1
 // and 2 can test the patterns themselves.
 const STALE_CLAIM_PATTERNS = [
   `${CLOSED} by an? express|(mount[- ](root|segment)|/public/|this note|[Oo]ne edge).*${CLOSED}`,
   `(/public/|-> 404|→ 404).*${NEVER_PASS}`,
   `([Oo]ne edge|the edge|this edge|that edge).*${OPEN}`,
-  `[Dd]o not ${CLOSE_HERE}`
+  `[Dd]o not ${CLOSE_HERE}`,
+
+  // ---- retired by abofs/stonyx-rest-server#56 ------------------------------
+  // SCOPED TO THE CLAIM, not to the English, and the scoping is tighter here
+  // than it looks. What is banned is the PENDING framing -- "#56 has not
+  // shipped yet", "the percent-encoding axis is open/live" -- which is false
+  // the moment the fix lands. What is deliberately NOT banned is any statement
+  // that a raw-path hook is still a live finding, because after #56 that is
+  // TRUE for any id containing a reserved character, and assertion 2 pins that
+  // it stays writable. An unscoped ban in this file already forbade a true
+  // statement once (see the header); this is the same trap one issue later,
+  // approached from the other side.
+  `[Uu]ntil #56 ships`,
+  `[Tt]racked as \\[?#56`,
+  `([Pp]ercent-encod[a-z]*|fourth axis|encoded-path axis|[Tt]his axis) ${OPEN}`,
+  `([Pp]ercent-encod[a-z]*|fourth axis)[^.]{0,90}(\\*\\*live\\*\\*|live residual|live bypass)`
 ];
 
 // The claims the ledger retired, quoted from `origin/dev` @ f5c9a24 -- all 8
@@ -63,13 +87,39 @@ const RETIRED_CLAIMS = [
   ['test/integration/rest-server-test.ts:295', `segment's trailing slash ${CLOSED} by an express setting -- for`]
 ] as const;
 
-// Honest disclosures of the #56 residual, in the English the unscoped ban made
-// unwritable. None of these may match any pattern above.
+// The claims #56 retired, quoted from `dev` @ 224f3e2. Two of them came from
+// this file's OWN honest-disclosure list, and that is the point worth carrying:
+// a sentence written as an honest disclosure of an open defect becomes a stale
+// claim the moment the defect is closed. A ledger whose fixtures are never
+// revisited certifies last quarter's truth.
+const RETIRED_CLAIMS_56 = [
+  ['docs/agents/security-reviewer.md:25', `a fourth axis (percent-encoding) is ${LIVE}, see the residuals at the end`],
+  ['docs/agents/security-reviewer.md:27', `${UNTIL_SHIPS}, treat "authorizes on originalUrl" and "req.path" as live findings`],
+  ['docs/agents/security-reviewer.md:27', `${TRACKED_LINK}(https://github.com/abofs/stonyx-rest-server/issues/56) (priority-critical)`],
+  ['README.md:204', `${TRACKED} - until it ships, do not read a param-segment route class as covered`],
+  ['README.md:334', `while your hook compared %73ecret and did not match - unauthenticated 200. ${TRACKED}`],
+  ['docs/project-structure.md:326', `Percent-encoding is not normalized on either side, and this one is a ${LIVE_RESIDUAL}`],
+  ['test/unit/ledger-test.ts:69 (own fixture)', `Percent-encoding ${OPEN} on any route class with a param segment (#56).`],
+  ['test/unit/ledger-test.ts:70 (own fixture)', `This axis ${OPEN}: express does not decode req.path either, so target === canonical.`],
+  ['test/unit/ledger-test.ts:72 (own fixture)', `A residual ${OPEN} and ${CLOSED} without decoding both sides; ${TRACKED}.`]
+] as const;
+
+// Honest disclosures that must stay WRITABLE. Re-pointed by #56 at the residual
+// that actually remains -- reserved characters, more than one spelling per
+// decoded id, `req.params` as the sound comparison -- rather than at the axis
+// #56 closed. None of these may match any pattern above.
+//
+// The second entry is the load-bearing one. It says a raw-path hook is STILL a
+// live finding, which is true after #56 for any id containing a reserved
+// character, and it is exactly the sentence an over-broad "no more live
+// findings about encoding" ban would have eaten.
 const HONEST_DISCLOSURES = [
-  `Percent-encoding ${OPEN} on any route class with a param segment (#56).`,
-  `This axis ${OPEN}: express does not decode req.path either, so target === canonical.`,
   `The encoded-path axis ${CLOSED} by the raw-target comparison, by construction (#56).`,
-  `A residual ${OPEN} and ${CLOSED} without decoding both sides; tracked as #56.`
+  `A raw-path hook is still a live finding for any id containing a reserved character (#56).`,
+  `Reserved characters must stay encodable, so one decoded id still has more than one accepted spelling.`,
+  `req.params is the sound comparison; req.path and req.originalUrl are raw and always were.`,
+  `Closed by canonicalEncoding (#56); the reserved-character residual below is not, and cannot be.`,
+  `A residual ${OPEN} on the reserved-character axis and the module ${CLOSED} without 404ing legitimate encodings.`
 ];
 
 // Anchored at the repository root so every path below is independent of the
@@ -139,10 +189,20 @@ module('[Acceptance] Tripwire ledger (#54)', function() {
       assert.ok(matched, `1. the scoped patterns still catch the retired claim from ${origin}`);
     }
 
+    // 1b. Same for the claims #56 retired, including the three this file
+    // carried as its OWN honest-disclosure fixtures until #56 shipped.
+    for (const [origin, claim] of RETIRED_CLAIMS_56) {
+      const matched = STALE_CLAIM_PATTERNS.some(pattern => new RegExp(pattern).test(claim));
+      assert.ok(matched, `1b. the scoped patterns catch the claim #56 retired, from ${origin}`);
+    }
+
     // 2. ...and the scoping achieved what it was narrowed for: an honest
-    // disclosure of the #56 residual is writable without tripping the ledger.
-    // This is the assertion that keeps a future engineer from softening a real
-    // limitation to get a green suite.
+    // disclosure of the residual that ACTUALLY remains is writable without
+    // tripping the ledger. This is the assertion that keeps a future engineer
+    // from softening a real limitation to get a green suite -- and after #56 it
+    // has teeth in the opposite direction too: entry 2 asserts that calling a
+    // raw-path hook a live finding stays writable, because for an id containing
+    // a reserved character that is still TRUE.
     for (const disclosure of HONEST_DISCLOSURES) {
       const matched = STALE_CLAIM_PATTERNS.filter(pattern => new RegExp(pattern).test(disclosure));
       assert.deepEqual(matched, [], `2. an honest #56 disclosure is not banned: "${disclosure}"`);
@@ -186,13 +246,52 @@ module('[Acceptance] Tripwire ledger (#54)', function() {
     assert.ok(projectStructure.includes('scoped to the two SETTINGS'), '7. and it is explicitly re-scoped to the settings rather than left as end-to-end behaviour');
     assert.ok(projectStructure.includes('canonicalRoutes'), '7. docs/project-structure.md documents the new key');
 
-    // 8. The #56 residual must stay disclosed in all three artifacts that
-    // previously read as "the class is closed". This is the same tripwire
-    // shape as the ledger itself, pointed at the NEXT stale claim rather than
-    // the last one: a tidy that deletes the residual re-creates the state that
-    // made #54's own predecessor claim wrong.
-    assert.ok(securityBrief.includes('#56'), '8. the security-reviewer brief still discloses the #56 percent-encoding residual');
-    assert.ok(readme.includes('#56'), '8. the README still discloses the #56 percent-encoding residual');
-    assert.ok(projectStructure.includes('#56'), '8. docs/project-structure.md still discloses the #56 percent-encoding residual');
+    // 8. THE WEAK HALF, KEPT AND LABELLED RATHER THAN PRESENTED AS COVERAGE.
+    //
+    // These three assert the substring `#56` is present. Written before #56
+    // shipped, they were meant to guarantee the residual stayed disclosed. They
+    // cannot: `#56` still appears in all three artifacts after the fix, in the
+    // behaviour-change list and the config table, so they stay green whether
+    // the residual is honestly disclosed OR falsely announced closed. They red
+    // only under total deletion of every mention -- the `AC10` comment-out
+    // shape from docs/framework/testing.md, one file over.
+    //
+    // They are kept because a total deletion IS worth catching and nothing else
+    // catches it. What they are not is evidence about the residual; assertion 9
+    // is. Do not read this block as covering what 9 covers.
+    assert.ok(securityBrief.includes('#56'), '8. the security-reviewer brief mentions #56 at all (weak: true both before and after the fix)');
+    assert.ok(readme.includes('#56'), '8. the README mentions #56 at all (weak: true both before and after the fix)');
+    assert.ok(projectStructure.includes('#56'), '8. docs/project-structure.md mentions #56 at all (weak: true both before and after the fix)');
+
+    // 9. THE ASSERTION THAT CAN ACTUALLY FAIL. #56's residual is not the
+    // percent-encoding axis -- that is closed -- it is that RESERVED characters
+    // must stay encodable, so one decoded id still has more than one accepted
+    // spelling and a raw-path comparison remains unsound for it.
+    //
+    // Each artifact must carry BOTH halves: the measurement (`a%2Bb`, the two
+    // spellings of the id `a+b`) and the remedy (`req.params`). An artifact
+    // that quietly announces the class closed loses the first; one that states
+    // the limitation without the fix loses the second. `#56` alone loses
+    // neither and that is exactly why assertion 8 cannot see either.
+    const RESIDUAL_ARTIFACTS = [
+      ['README.md', readme],
+      ['docs/project-structure.md', projectStructure],
+      ['docs/agents/security-reviewer.md', securityBrief]
+    ] as const;
+
+    for (const [name, contents] of RESIDUAL_ARTIFACTS) {
+      assert.ok(contents.includes('a%2Bb'), `9. ${name} carries the measured two-spellings-one-id example (a+b / a%2Bb) rather than announcing the class closed`);
+      assert.ok(contents.includes('req.params'), `9. ${name} names req.params as the sound comparison, not just the limitation`);
+      assert.ok(contents.includes('reserved'), `9. ${name} names RESERVED characters as what keeps the residual open`);
+    }
+
+    // 10. The opt-out must be LOUD, not inherited silently -- stonyx#95's
+    // defect. `REST_CANONICAL_ENCODING=false` re-opens a security hole, so the
+    // two artifacts a consumer and a reviewer actually read must both name it.
+    assert.ok(readme.includes('REST_CANONICAL_ENCODING=false'), '10. the README names REST_CANONICAL_ENCODING=false as re-opening the bypass');
+    assert.ok(securityBrief.includes('REST_CANONICAL_ENCODING=false'), '10. the security-reviewer brief names REST_CANONICAL_ENCODING=false as re-opening the bypass');
+    assert.ok(projectStructure.includes('REST_CANONICAL_ENCODING=false'), '10. docs/project-structure.md names the opt-out env var');
+    assert.ok(securityBrief.includes('post-#56'), '10. the security-reviewer brief records #56 as SHIPPED, not pending');
+    assert.ok(securityBrief.includes('shouldRejectEncoding()'), '10. and names the predicate, so a reviewer can find the control it is reviewing');
   });
 });

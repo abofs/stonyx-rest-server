@@ -46,27 +46,45 @@ Valid HTTP methods (enforced): `get`, `post`, `put`, `delete`, `patch`
 
 ### src/route-matching.ts
 
-The config-read site for the **route-matching family** — the three keys
-`caseSensitiveRoutes` (#47), `strictRoutes` (#50) and `canonicalRoutes` (#54).
-Two exports, with deliberately different lifetimes:
+The config-read site for the **route-matching family** — the four keys
+`caseSensitiveRoutes` (#47), `strictRoutes` (#50), `canonicalRoutes` (#54) and
+`canonicalEncoding` (#56). Three exports, with deliberately different lifetimes:
 
 | export | kind | lifetime | reads |
 |---|---|---|---|
 | `applyRouteMatching(api)` (default) | applies express **settings** | called from **both** express constructors, and must stay constructor-timed — express materializes a router lazily on first route registration, so a setting applied later is silently ineffective | `caseSensitiveRoutes`, `strictRoutes` |
 | `shouldRejectTarget(req)` (named) | a **per-request predicate**, not a setting | called from the handler closure in `Request.registerCalls()`, once per request | `canonicalRoutes` |
+| `shouldRejectEncoding(req)` (named) | a **per-request predicate**, not a setting | called from the same closure, once per request, on its own line and independently of `shouldRejectTarget()` | `canonicalEncoding` |
 
 **Admission rule for this file** — it exists so a reviewer does not have to
 re-derive the judgement each time something route-shaped needs a home. What
 belongs here is *a config read for the route-matching family, and the code that
 directly consumes it*. That is what makes one file the right shape despite the
-two lifetimes: all three keys share one guard-polarity rule (`!== false`, fail
-toward the safe value), and splitting `shouldRejectTarget()` into its own module
-would put two of the three flags in one file and the third in another, leaving
-no single place where that rule sits beside every instance of it. What does
-**not** belong: anything that is neither a member of this family nor its
-consumer, and — specifically — a *fourth* member. Three is the documented family
-size; a fourth is the point at which to split by lifetime (settings vs
-per-request checks) rather than growing this file again.
+two lifetimes: all four keys share one guard-polarity rule (`!== false`, fail
+toward the safe value), and there is one place where that rule sits beside every
+instance of it. What does **not** belong: anything that is neither a member of
+this family nor its consumer.
+
+> **The documented split trigger fired, and the split was deliberately not
+> taken. Recording that rather than editing the rule out.** The previous version
+> of this paragraph said *"Three is the documented family size; a fourth is the
+> point at which to split by lifetime (settings vs per-request checks) rather
+> than growing this file again."* #56 is that fourth member, and it was added
+> here anyway, on the #56 refinement's explicit instruction (accepted by the CTO
+> without amendment): the new predicate is a **sibling** of
+> `shouldRejectTarget()` and the argument for the two of them living together —
+> one guard-polarity rule, one timing contract, one call site — is the same
+> argument that put `shouldRejectTarget()` here. Splitting in the same change
+> that adds a security control would have moved #54's comment block and its
+> upstream citations for no behavioural gain, on the day the file was being
+> reviewed for something else.
+>
+> **The trigger is not withdrawn, it is deferred, and it is now overdue.** A
+> *fifth* member splits this file by lifetime — `applyRouteMatching()` and the
+> two settings in one module, the per-request predicates in another — and
+> whoever adds it should not have to re-argue this. The cost of the deferral is
+> stated plainly: this file is now ~300 lines of which most is prose, and a
+> reader looking for the settings has to scroll past two predicates.
 
 See [Case-sensitive routing (#47)](#case-sensitive-routing-47),
 [Strict routing (#50)](#strict-routing-50) and
@@ -83,6 +101,7 @@ From `config/environment.js`. All values are overridable via environment variabl
 | `caseSensitiveRoutes` | **Boolean**     | `true`                        | `REST_CASE_SENSITIVE_ROUTES=false` to disable | Match route paths case-sensitively. Applied via `app.set('case sensitive routing', true)` in **both** the `RestServer` constructor and the `Request` constructor -- see below. Disabling re-opens the URL-authorization bypass of #47 |
 | `strictRoutes`      | **Boolean**       | `true`                        | `REST_STRICT_ROUTES=false` to disable       | Match route paths strictly -- a trailing slash does not match a route registered without one. Applied via `app.set('strict routing', true)` in the same two constructors. Disabling re-opens the URL-authorization bypass of #50. Separate key from `caseSensitiveRoutes` on purpose -- see below |
 | `canonicalRoutes`   | **Boolean**       | `true`                        | `REST_CANONICAL_ROUTES=false` to disable    | Reject a request whose RAW target is not the canonical path express matched, ahead of the consumer's `auth` hook. **Not an express setting** -- a per-request check, `shouldRejectTarget()` in `src/route-matching.ts`, called from the handler closure in `Request.registerCalls()`. Disabling re-opens BOTH `req.originalUrl` bypasses of #54 (mount-root trailing slash, and absolute-form request target on every route registered through `Request.registerCalls()`). Separate key from the two above on purpose -- see below |
+| `canonicalEncoding` | **Boolean**       | `true`                        | `REST_CANONICAL_ENCODING=false` to disable  | Reject a request whose RAW target percent-encodes an RFC 3986 §2.3 **unreserved** character (`ALPHA / DIGIT / "-" / "." / "_" / "~"`), ahead of the consumer's `auth` hook. **Not an express setting** -- a per-request check, `shouldRejectEncoding()` in `src/route-matching.ts`, called from the handler closure in `Request.registerCalls()`. Disabling re-opens the #56 bypass against a hook comparing `req.path` **or** `req.originalUrl` on any route class with a `:param` segment. Separate key from `canonicalRoutes` on purpose -- see below |
 | `trustProxy`        | **Boolean**       | `false`                       | `REST_TRUST_PROXY=true` to enable           | Trust reverse proxy headers (`X-Forwarded-Proto`) for correct protocol detection behind load balancers |
 | `origin`            | **String**        | `'*'`                         | `REST_CORS_ORIGIN`         | CORS allowed origin(s)                                          |
 | `methods`           | **String**        | `'GET,POST,PATCH,PUT,DELETE'` | `REST_CORS_METHODS`        | CORS allowed methods                                            |
@@ -323,26 +342,20 @@ neither a setting nor constructor-timed.
   the fix, so this is the consumer's comparison to own, and the README says so.
   `test/sample/requests/admin.ts` models the correctly-written hook and AC1.8
   asserts the module still delivers `GET /admin?x=1` to it.
-- **Percent-encoding is not normalized on either side, and this one is a live
-  residual rather than a benign limit.** Express decodes only `req.params` —
-  neither `req.path` nor `req.originalUrl` — so for `GET /enc/%73ecret` both
-  `target` and `canonical` are the encoded string, they agree, and
-  `shouldRejectTarget()` passes the request through *by construction*. No change
-  to the comparison can see it: the disagreement is between the matched target
-  and the *decoded* value the handler acts on. Measured on a hook authorizing on
-  `req.originalUrl` with the query correctly stripped, on a `/:id` route:
-  `GET /enc/secret` → 401, `GET /enc/%73ecret` → **200, guarded handler,
-  unauthenticated** — identical on `origin/dev`, so a residual and not a #54
-  regression. It is **wider** than the two axes #54 closes: `%73` defeats a
-  `req.path` hook too. Tracked as
-  [#56](https://github.com/abofs/stonyx-rest-server/issues/56)
-  (`priority-critical`).
+- **`shouldRejectTarget()` is structurally blind to percent-encoding, and that
+  has not changed — it is a fourth control that closes it, not this one.**
+  Express decodes only `req.params`, so for `GET /enc/%73ecret` both `target`
+  and `canonical` are the same encoded string and this comparison passes the
+  request through *by construction*. No change to it can see that axis: the
+  disagreement is between the matched target and the *decoded* value the handler
+  acts on. `canonicalEncoding` (#56) is what rejects it, on its own line, from
+  its own key — see § *Percent-encoded request target (#56)* below.
 
 **No regression** (measured): routes registered with a literal trailing slash,
 param routes, index-mounted route classes, query strings on canonical paths, and
 `/health`. **"No regression" is not "no residual"** — for param routes the two
-differ, see the percent-encoding scope limit above (#56), and for `/health` the
-reason is that it is outside the check entirely.
+differ, see § *Percent-encoded request target (#56)* below, and for `/health`
+the reason is that it is outside the check entirely.
 
 Consumer-visible behaviour change, on two axes: `GET /route/` at a mount root
 goes 200 → 404, and every route **registered through `Request.registerCalls()`**
@@ -352,6 +365,146 @@ limits above. The second has the larger blast radius — for such
 a client it is a total outage. Rejections are indistinguishable from a genuine
 miss by design and this module emits no request logging, so the only symptom is
 a bare `Cannot GET …`.
+
+### Percent-encoded request target (#56)
+
+`canonicalEncoding` closes the fourth axis: an ordinary id, spelled oddly. It is
+the second member of the family that is **not** a setting, and the second
+per-request predicate.
+
+```
+target = req.originalUrl.split('?')[0]                                  // raw, unparsed
+if (enforced && target has a %XX whose octet is RFC 3986 §2.3 UNRESERVED)
+  return next('router');
+```
+
+Express decodes `req.params` and **nothing else** — `req.path` and
+`req.originalUrl` both stay percent-encoded — so a consumer hook comparing
+either raw field was walked past by re-spelling the id. Measured by raw TCP
+socket on `dev` @ `224f3e2`, before and after:
+
+| probe | before | after |
+|---|---|---|
+| `GET /enc/secret` (hook on `req.path`) | 401 | 401 |
+| `GET /enc/%73ecret` | **200** (guarded handler, unauthenticated, `id === "secret"`) | **404** |
+| `GET /enco/%73ecret` (hook on `req.originalUrl`) | **200** (guarded handler, unauthenticated) | **404** |
+| `GET /enc/%73%65%63%72%65%74` | **200** | **404** |
+| `GET /private/%66ailure` (literal guard, sibling `/:id`) | **200** `{"data":"param-route"}` | **404** |
+| `GET /private/restricted` | 403 | 403 |
+| `GET /enc/open` | 200 `id "open"` | 200 `id "open"` |
+| `GET /enc/sec%2fret` | 200 `id "sec/ret"` | 200 `id "sec/ret"` |
+| `GET /enc/%2573ecret` | 200 `id "%73ecret"` | 200 `id "%73ecret"` |
+| `GET /public/url-params/%61/b/c` | 200 | **404** (breaking) |
+
+**Both hook shapes are equally exposed, and that is a structural fact rather
+than an oversight.** There is no spelling that defeats a `req.path` hook and not
+an `req.originalUrl` one: both fields are raw. The `req.path` shape is the more
+likely to exist in the field, because it is the shape this repo's own #47/#50
+work steered consumers toward and the one `test/sample/requests/private.ts`
+uses.
+
+**A third shape is worse than either, and it is in the shipped fixture.**
+`private.ts` guards a **literal** route on `req.path` and co-registers `/:id`.
+The encoded spelling misses the literal layer and is **absorbed by the sibling
+param route**, so the guard is walked past without the guarded handler ever
+being the one that runs. The `req.params?.id === 'restricted'` clause of that
+*same hook object* still holds while its `req.path === '/failure'` clause does
+not — one hook, two clauses, and the difference is only which field each reads.
+
+**It is a family, not a list of spellings.** Enumerated over a raw socket
+against unfixed `dev`, every subset of byte positions crossed with hex-digit
+case: **63/63 spellings of `secret` returned 200**, and **71/71 of `admin`**.
+The count is `∏(1 + vᵢ) − 1`, where `vᵢ` is the number of percent-spellings of
+byte *i* — 2 when its hex carries a letter digit (`m` = `0x6d` → `m`, `%6d`,
+`%6D`), 1 otherwise, and ≥2 for every byte of a multi-byte character, so a
+non-ASCII id is unbounded for practical purposes. The ACs therefore assert **the
+rule**, and sample four positions (first, middle, last, all) only to show it is
+not character-positional.
+
+**The bypass is exclusive to route classes with a `:param` segment.** Literal
+routes and mount segments match **raw**, so they were never reachable this way —
+measured: `GET /admin/%73ettings` → 404 and `GET /%65nc/secret` → 404, both
+before and after.
+
+Four things about this are load-bearing and each has a red-able assertion.
+
+**1. The rule is an unreserved-octet scan, not a decode-and-compare.** Two wrong
+implementations were built and measured, and each breaks a legitimate request:
+
+| mutation | closes `%73ecret`? | collateral |
+|---|---|---|
+| `decodeURIComponent(target) !== target` | yes | `GET /enc/sec%2fret` → **404**, but the router routed it to the *distinct* id `sec/ret`. It decodes-then-splits; the router splits-then-decodes |
+| decode until stable | yes | `GET /enc/%2573ecret` → **404**, but that names the legitimately distinct id `%73ecret` |
+
+Killed by AC3 and AC4 respectively. Express decodes **exactly once**, so `%2561`
+is not a bypass and a loop invents a false deny.
+
+**2. Reserved characters must stay encodable, so the allowlist is over octets
+and not over triplets.** RFC 3986 §2.3 names `ALPHA / DIGIT / "-" / "." / "_" /
+"~"` as the characters a URI generator must **not** encode and a normaliser
+**must** decode (§6.2.2.2), so rejecting them removes the entire "an ordinary
+id, spelled oddly" family without touching a single encoding a client is
+required to emit. `%2f`, `%2B` and `%25` all still route. Killed by AC3.
+
+**3. It is a fourth key, not a reuse of `canonicalRoutes`.** Measured with the
+rule implemented correctly but read through #54's key:
+`REST_CANONICAL_ROUTES=false` returns `GET /enc/%73ecret` to **200**. That flag
+is exactly what a consumer behind an absolute-form-emitting forward proxy must
+set, so folding the two would hand precisely those consumers the encoding bypass
+as the price of staying up — the same argument #50 makes for not being a rename
+of #47. Killed by unit AC5, which also asserts *in that same state* that #54's
+own vector **is** re-opened, so an implementation that ignores `canonicalRoutes`
+entirely cannot pass it vacuously.
+
+**4. Same three call-site properties as #54, and they are not re-derived.** It
+runs **outside** `if (this.auth)`, **before** it, and rejects with
+`next('router')`. The ordering half has its own oracle here and it is a
+different one from #54's: `GET /private/restricte%64` answers **404**, because
+`private.ts`'s hook reads `req.params.id` — which express decodes — in its
+second clause. Move the call below the `auth` block and it answers **403**, the
+consumer's own hook status on a request the module was about to reject. Killed
+by AC1.6; the `next('router')` half is killed by AC1.4's `shapeOf()`
+deep-equal against a genuine miss.
+
+**Malformed and over-long escapes are not this rule's business.** `%zz`, `%`,
+`%6`, `%c1%a1` and `%e0%81%a1` all answer **400** from `decodeParam` in
+`router@2.2.0` `lib/layer.js:225`, during matching and before any handler or
+hook runs — measured identical before and after. None of those octets is
+unreserved and the first three are not valid triplets, so the rule does not
+touch them either way. Pinned by AC3.4 so that a change which started answering
+404 for them would be visible.
+
+**Timing contract:** identical to `shouldRejectTarget()`, opposite to the two
+settings. Read **per request**, inside the handler closure; no
+lazy-materialisation hazard, so do not move it into `applyRouteMatching()`.
+
+**Scope limit — and this one is the residual the fix cannot close.** The rule
+cannot give each decoded id exactly one accepted spelling, because reserved
+characters must remain encodable. Measured **after** the fix:
+
+```
+GET /enc/a+b        -> 200  id "a+b"
+GET /enc/a%2Bb      -> 200  id "a+b"        <- two accepted spellings, ONE id
+GET /enc/sec%2fret  -> 200  id "sec/ret"
+GET /enc/sec%2Fret  -> 200  id "sec/ret"    <- hex-digit case, same id again
+```
+
+So **a hook comparing a raw path string remains unsound for any id containing a
+reserved character, and `req.params` is the sound idiom.** `req.params` is
+decoded by express and is populated *before* `auth()` runs, by deliberate design
+(`src/request.ts`, *"Run auth after route matching so request.params is
+populated"*), and the existing integration test *Auth hook has access to
+request.params from matched route* pins that. This is the direct analogue of
+#54's `?x=1` residual: the consumer's comparison to own, and the module cannot
+close it without 404ing encodings clients are required to emit. It gets a ledger
+assertion rather than an issue, because it needs no code.
+
+Consumer-visible behaviour change: any client that **over-encodes an unreserved
+character** in a path now gets 404 — `GET /public/url-params/%61/b/c` goes
+200 → 404, measured on this repo's own fixture. The blast radius is smaller than
+#54's, because over-encoding an unreserved character is never required, whereas
+absolute-form-emitting forward proxies are a real deployment shape. The opt-out
+is `REST_CANONICAL_ENCODING=false` and it **re-opens the bypass**.
 
 ## Test Structure
 
@@ -364,10 +517,33 @@ Overrides `restServer.dir` to `'./test/sample/requests'` so tests load sample re
 Unit tests for `Request` static methods:
 - `getState` — creates/returns state object on request
 - `sendStatusResponse` — sends status with optional `statusMap` message
-- the three route-matching config flags (`caseSensitiveRoutes` #47, `strictRoutes` #50, `canonicalRoutes` #54), each over real HTTP on `listen(0)`, each probing **both** failure shapes of the `!== false` guard. This is the only tier that can see a fail-open guard: the shipped defaults are all `true`, so `=== true` leaves every integration assertion green
+- the four route-matching config flags (`caseSensitiveRoutes` #47, `strictRoutes` #50, `canonicalRoutes` #54, `canonicalEncoding` #56), each over real HTTP on `listen(0)`, each probing **both** failure shapes of the `!== false` guard. This is the only tier that can see a fail-open guard: the shipped defaults are all `true`, so `=== true` leaves every integration assertion green — measured for #56, weakening its read to `=== true` reports 40 pass / 1 fail with the unit AC as the only failure
+- #56's AC5, which pins that `canonicalEncoding` is **independent** of `canonicalRoutes` — and asserts, in the same config state, that #54's own vector is genuinely re-opened, so the independence claim cannot pass vacuously
+- two fixture classes, not one. `EncodingFixtureRequest` carries the `/:id` route #56 needs and `RouteMatchingFixtureRequest` must not have: measured, adding `/:id` to the shared fixture reds #47's AC6 (`/SUCCESS` is absorbed by the param route at 200). #50's AC3 stays green under that same edit, because `/:id` is equally strict
+
+### test/unit/config-test.ts
+Acceptance anchor for #56's AC7 — the shipped default of `canonicalEncoding`
+stays **live** and stays **unpinned**, which are two different properties.
+
+- It asserts the **effect**: `config.restServer.canonicalEncoding === true` in
+  the resolved config, so inverting or deleting the line in
+  `config/environment.js` turns it red. A source-text assertion alone would not.
+- It asserts the **set**, not the key: all four route-matching keys resolve to
+  the secure direction together, which is what notices a *new* sibling arriving
+  with an insecure default.
+- It asserts the key is **not pinned** in `test/config/environment.ts`, for all
+  four keys, with a positive control (`dir` *is* pinned) so the four absences
+  mean absent rather than unread.
+
+The counterintuitive half is the last one, and it is measured rather than
+argued: pinning `canonicalEncoding` **and** inverting the shipped default
+reports **40 pass / 0 fail** with this file removed — a completely green suite
+shipping an insecure default. With this file present the same state reports
+**40 pass / 1 fail**. See the comment block on the key in `config/environment.js`
+for the full (a)/(b) numbers.
 
 ### test/unit/ledger-test.ts
-Acceptance anchor for #54's AC3. Runs `git grep -nE` over the tracked tree for
+Acceptance anchor for #54's AC3 **and #56's AC8**. Runs `git grep -nE` over the tracked tree for
 the four stale claims that #50 left behind — that the mount-root edge is
 unclosable by anything, that a `/public/` -> 404 assertion is unachievable, that
 the edge is still open, and the instruction not to close it in
@@ -387,7 +563,27 @@ Three properties of it are load-bearing:
   (the mount root, `/public/`, or "by an express setting") on the same line. The
   test pins both directions: assertion 1 replays the scoped patterns against all
   8 retired claims quoted from `origin/dev`, so narrowing cannot disarm the ban;
-  assertion 2 asserts four honest #56 disclosures are *not* matched.
+  assertion 2 asserts four honest disclosures are *not* matched.
+
+  **#56 turned that principle back on this file.** Two of the four "honest
+  disclosures" it carried were honest only while #56 was *open*: a sentence
+  saying the percent-encoding axis is unclosed on a param-segment route class is
+  a stale claim the moment the fix ships. (Not quoted here — quoting it would
+  plant the very string the ledger greps for.) They were **retired into the
+  claim list rather than deleted**, and the honest-disclosure list was
+  re-pointed at the residual that
+  actually remains (reserved characters, multiple spellings, `req.params` as the
+  sound comparison). A ledger whose honest-disclosure fixtures are never revisited
+  becomes a ledger that certifies last quarter's truth.
+- **Assertion 8 was a guard that could not fail, and #56 fixed it rather than
+  inheriting it.** It asserted the three artifacts contain the substring `#56` —
+  which they still do after the fix, because `#56` appears in the
+  behaviour-change list. So it stayed green whether the residual was honestly
+  disclosed **or** falsely announced closed, and it could only red under total
+  deletion: the `AC10` comment-out shape from `docs/framework/testing.md`. It now
+  additionally requires the residual's own markers (the `a%2Bb` measurement and
+  `req.params`) in each artifact, and the substring check is kept and labelled
+  as the weak half rather than presented as coverage.
 - **The grep is repo-root-anchored (`:/`), not cwd-relative (`.`).** With `.`,
   running from `<repo>/test` searched only the test subtree — every pattern
   returned 0 while `README.md`, `docs/` and `src/` were never read, and the old
@@ -416,6 +612,8 @@ Sample Request subclasses used by integration tests:
 - `private.ts` — `PrivateRequest` with `auth()` hook that rejects `/failure` with 505
 - `index.ts` — `IndexRequest`, mounted at `/` because of its filename. The only mount shape where `req.baseUrl` is `''`, which is what gives the `&& req.baseUrl` conjunct in `shouldRejectTarget()` a regression guard (#54 AC1.12): without the conjunct `GET /` 404s and, before this fixture existed, the suite stayed 34/0 either way
 - `admin.ts` — `AdminRequest` with an `auth()` hook authorizing on **`req.originalUrl`**, the field express does not normalize. That shape is the point: rewritten to compare `req.path` the fixture cannot express #54's defect at all, since `req.baseUrl + req.path` is `/admin/` for both spellings of the mount root. Also registers `/legacy/` *with* a literal trailing slash, so an over-broad "target must not end in /" rule turns AC1.10 red
+- `enc.ts` — `EncRequest`, #56 shape A: a `/:id` route guarded by a hook comparing **`req.path`**. The param segment is load-bearing — literal routes match raw, so a literal-only fixture cannot express the defect. Its handler echoes `id`, `path` and `originalUrl` so the ACs can assert *which value the handler received*, which is the asymmetry the defect is made of
+- `enco.ts` — `EncoRequest`, #56 shape B: the same route guarded by a hook comparing the query-stripped **`req.originalUrl`**, modelled on `admin.ts`. Both shapes are needed and neither subsumes the other: no spelling defeats one and not the other, because both fields are raw
 
 ## CI/CD
 
@@ -450,7 +648,7 @@ stonyx-rest-server/
 ├── src/
 │   ├── main.ts                    # RestServer class (singleton, Express wrapper)
 │   ├── request.ts                 # Request base class (handler registration, auth hook)
-│   └── route-matching.ts          # Route-matching family: settings (#47/#50) + canonical-target check (#54)
+│   └── route-matching.ts          # Route-matching family: settings (#47/#50) + canonical-target check (#54) + encoding check (#56)
 ├── test/
 │   ├── config/
 │   │   └── environment.ts         # Test config override (dir → test/sample/requests)
@@ -459,11 +657,14 @@ stonyx-rest-server/
 │   ├── sample/
 │   │   └── requests/
 │   │       ├── admin.ts           # Sample request with an originalUrl auth hook (#54 fixture)
+│   │       ├── enc.ts             # /:id guarded on req.path (#56 shape A fixture)
+│   │       ├── enco.ts            # /:id guarded on req.originalUrl (#56 shape B fixture)
 │   │       ├── index.ts           # Index-mounted class (baseUrl ''), #54 AC1.12 fixture
 │   │       ├── private.ts         # Sample private request with auth hook
 │   │       └── public.ts          # Sample public request with middleware demos
 │   └── unit/
-│       ├── ledger-test.ts         # Tripwire ledger grep (#54 AC3)
+│       ├── config-test.ts         # Shipped-default + unpinned-key anchor (#56 AC7)
+│       ├── ledger-test.ts         # Tripwire ledger grep (#54 AC3, #56 AC8)
 │       └── request-test.ts        # Unit tests for Request statics (QUnit)
 ├── .gitignore
 ├── .npmignore
