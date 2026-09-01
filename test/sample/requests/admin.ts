@@ -10,6 +10,18 @@ import type { RequestState, RouteHandlers } from '../../../src/request.js';
 // the defect at all, since `req.baseUrl + req.path` is `/admin/` for BOTH
 // spellings of the mount root and identical for origin-form and absolute-form
 // targets alike.
+//
+// The hook drops the query string before comparing, and that is deliberate
+// rather than incidental. `canonicalRoutes` compares the query-stripped target
+// (a query string is a legitimately variable part of the request target, so
+// rejecting on it would 404 every `?`-carrying request), which means the module
+// permits `GET /admin?x=1` through to this hook. Measured on `origin/dev` AND on
+// this branch: with a hook that compares the RAW `originalUrl` including the
+// query, `GET /admin?x=1` reaches the guarded handler unauthenticated either
+// way -- the fix neither opens nor closes it. That residual belongs to the
+// consumer's comparison, not to this module, so the fixture models the
+// correctly-written hook and AC1 asserts the module still delivers
+// `GET /admin?x=1` to it (401). See "scope limits" in the #54 PR body.
 const PROTECTED = new Set(['/admin', '/admin/settings']);
 
 export default class AdminRequest extends Request {
@@ -34,7 +46,7 @@ export default class AdminRequest extends Request {
   };
 
   auth = (request: ExpressRequest, _state: RequestState): number | undefined => {
-    if (PROTECTED.has(request.originalUrl)) return 401;
+    if (PROTECTED.has(request.originalUrl.split('?')[0]!)) return 401;
     return undefined;
   };
 }
