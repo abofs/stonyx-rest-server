@@ -308,6 +308,25 @@ module('[Integration] Rest Server', function(hooks) {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // abofs/stonyx-rest-server#54 - canonical request target
+  //
+  // SCAFFOLD ONLY. Stubbed with QUnit `todo` rather than a passing placeholder
+  // so this commit is distinguishable from the finished fix in the run counts:
+  // a `todo` that passes is reported as a FAILURE, so these cannot be left
+  // behind once the assertions land.
+  //
+  // Every probe here must be issued over a RAW TCP SOCKET, never `fetch`.
+  // Measured during refinement: `fetch` normalises `/admin/.` to `/admin/` and
+  // cannot emit an absolute-form request target at all, so the absolute-form
+  // assertions written with `fetch` would pass on unfixed code.
+  // ---------------------------------------------------------------------------
+  module('canonical request target (#54)', function() {
+    test.todo('AC1 - the originalUrl bypass is closed on both vectors, and routing is not broken', function(assert) {
+      assert.ok(false, 'AC1 not implemented: raw-socket probes for the mount-root slash and absolute-form vectors');
+    });
+  });
+
   module('/health', function(hooks) {
     test('Health check endpoint is configured automatically', async function(assert) {
       const response = await fetch(`${endpoint}/health`);

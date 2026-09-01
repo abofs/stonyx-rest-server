@@ -227,4 +227,22 @@ module('[Unit] Request', function() {
       assert.equal(await statusFor('/success'), 200, 'the canonical path still works when opted out');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // abofs/stonyx-rest-server#54 - canonicalRoutes opt-out flag
+  //
+  // SCAFFOLD ONLY. Stubbed with QUnit `todo`, not a passing placeholder: a
+  // `todo` that passes is reported as a FAILURE, so this stub cannot survive
+  // into the finished fix unnoticed.
+  //
+  // This module is NOT redundant with the integration AC, for the same measured
+  // reason #50's AC3 is not: the shipped default is `true`, so a fail-open
+  // guard (`=== true` instead of `!== false`) leaves every integration
+  // assertion green. This is the only tier that can see that mutant.
+  // ---------------------------------------------------------------------------
+  module('canonicalRoutes config flag (#54)', function() {
+    test.todo('AC2 - the absent-key default is secure, and the opt-out opts out', function(assert) {
+      assert.ok(false, 'AC2 not implemented: both failure shapes of the `!== false` guard against a mounted fixture');
+    });
+  });
 });
