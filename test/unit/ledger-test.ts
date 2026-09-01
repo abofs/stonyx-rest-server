@@ -32,7 +32,8 @@
 // honest new disclosure.
 import QUnit from 'qunit';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const { module, test } = QUnit;
@@ -55,8 +56,47 @@ const UNTIL_SHIPS = 'Until ' + '#56 ships';
 const TRACKED_LINK = 'Tracked as ' + '[#56]';
 const LIVE_RESIDUAL = 'live ' + 'residual';
 
+// A WORD BOUNDARY THAT SURVIVES BOTH ENGINES. Do not write `\b` here.
+//
+// Every pattern in this file is handed to TWO regex engines: JS `RegExp` in
+// assertions 1/1b/1c/2, and `git grep -E` in assertions 3/4. Apple git's ERE
+// treats a backslash followed by an ALPHANUMERIC as that literal character
+// rather than as a Perl class, and it does not error. Measured on git 2.50.1
+// (Apple Git-155), each against a fixture file:
+//
+//   `is safe\b`     matches the line `the hook is safeb`   -- i.e. `\b` -> `b`
+//   `is\ssafe`      matches the line `isssafe`             -- i.e. `\s` -> `s`
+//   `canonical\w`   matches the line `canonicalw`          -- i.e. `\w` -> `w`
+//   `AC\d`          matches the line `ACd`                 -- i.e. `\d` -> `d`
+//
+// Tree-wide on this branch at fe2a451, `git grep -cE 'is safe\b' -- :/`
+// returned 0 files while `git grep -cE 'is safe' -- :/` returned 2. GNU git,
+// which is what CI runs, applies the word boundary and returns 1. That single
+// difference is why PR #58 accumulated eleven green local runs and a red CI on
+// the identical SHA: the one pattern that ended in `\b` was searching for a
+// string ending in a literal `b`, found nothing, and the ledger read the zero
+// as "the claim is absent". Assertion 0c is the control that now makes that
+// disagreement red instead of green.
+//
+// `[^A-Za-z0-9_]|$` is the portable spelling and is what `\b` means at the END
+// of a match: either a non-word character follows, or the line ends. Both
+// halves are plain POSIX ERE, supported by JS and by both gits. The `|$` branch
+// is the one worth naming: if some engine were to treat `$` inside a group as a
+// literal dollar sign, this pattern would degrade to "requires a following
+// delimiter" -- NARROWER, not vacuous, which is the safe direction to fail in.
+// Measured here anyway, and 0c pins it: the probe corpus carries a line whose
+// last characters are the match itself, so a lost `$` reds.
+//
+// Backslash + PUNCTUATION is fine and is left alone: `\[` (line below), `\*`
+// and `\.` were each measured to behave as literal-character escapes under this
+// same git -- `req\.path` matches `req.path` and does NOT match `reqXpath`.
+// The hazard is specific to backslash + alphanumeric.
+const WORD_END = '([^A-Za-z0-9_]|$)';
+
 // ERE for `git grep -E`, and also valid as a JS RegExp source so assertions 1
-// and 2 can test the patterns themselves.
+// and 2 can test the patterns themselves. Every construct used below must be
+// expressible in BOTH engines; assertion 0c enforces that rather than trusting
+// it.
 const STALE_CLAIM_PATTERNS = [
   `${CLOSED} by an? express|(mount[- ](root|segment)|/public/|this note|[Oo]ne edge).*${CLOSED}`,
   `(/public/|-> 404|→ 404).*${NEVER_PASS}`,
@@ -129,7 +169,7 @@ const STALE_CLAIM_PATTERNS = [
 // against the honest disclosures, so neither half can be disarmed silently.
 const FALSE_CLOSURE_PATTERNS = [
   `([Pp]ercent-encod[a-z]*|encoded-path axis|fourth axis|encoding (class|axis))[^.]{0,80}((fully|completely|entirely) (handled|closed|resolved|covered|addressed)|no residual|nothing remains)`,
-  `(raw[- ]path hook|raw path string|a hook comparing[^.]{0,40}raw|req\\.path|req\\.originalUrl)[^.]{0,50} (is|are) (now |already )?(safe|sound|sufficient|adequate|reliable)\\b`,
+  `(raw[- ]path hook|raw path string|a hook comparing[^.]{0,40}raw|req\\.path|req\\.originalUrl)[^.]{0,50} (is|are) (now |already )?(safe|sound|sufficient|adequate|reliable)${WORD_END}`,
   `(residual|limitation|finding|bypass)[^.]{0,60}(was |is |now )?(RESOLVED|[Rr]esolved)( in| by)? #5[46]`
 ];
 
@@ -244,6 +284,68 @@ const HONEST_DISCLOSURES = [
   `A residual ${OPEN} on the non-unreserved-octet axis and the module ${CLOSED} without 404ing legitimate encodings.`
 ];
 
+// ---------------------------------------------------------------------------
+// THE PROBE CORPUS, for assertion 0c/0d -- the EXPRESSIVENESS control.
+//
+// Assertion 0's original two checks grep for `canonicalRoutes`: a bare literal
+// with no alternation, no interval and no escape. They prove the grep RAN and
+// that its SCOPE reaches outside test/. They cannot prove the third thing the
+// zeroes in assertion 3 depend on, which is that git's ERE compiler can EXPRESS
+// the patterns it is being asked to certify. A control written in a simpler
+// regex than the patterns it validates is evidence about execution only.
+//
+// That gap is not hypothetical; it is the defect this fix round exists for. One
+// pattern ended in `\b`, Apple git compiled that to a literal `b`, the tree-wide
+// count came back 0, and every local run reported the ledger clean while CI --
+// the only environment where those patterns had ever actually executed --
+// reported the hit. Eleven green local runs, one red CI, identical SHA. The
+// measurement is recorded at WORD_END above.
+//
+// So the control is now differential rather than existential. Every banned
+// pattern is run over the SAME corpus by BOTH engines and the matched lines
+// must agree line-for-line. A construct the local git cannot express produces a
+// different match set than JS, and that reds -- for `\b`, and equally for `\d`,
+// `\s`, `\w`, a lookaround, a backreference or a non-greedy quantifier, none of
+// which are POSIX ERE. The control is derived from BANNED_PATTERNS, so a
+// pattern added later is covered without anyone remembering to extend it.
+//
+// The corpus is the fixtures this file already maintains -- every claim #54 and
+// #56 retired, every false closure, every honest disclosure -- which means it
+// carries both positives and near-misses. Three probes are added because the
+// existing fixtures leave gaps:
+//
+//   - CLOSE_HERE_PROBE: STALE_CLAIM_PATTERNS[3] is the one pattern with no
+//     positive among RETIRED_CLAIMS (the real hit read "close it here, and do
+//     not read this note as..." -- the words in the other order). Without it,
+//     that pattern's differential check compares two empty sets and passes for
+//     any pattern whatsoever. 0c asserts the gap does not reopen.
+//   - BOUNDARY_PROBE_HIT ends AT the match, with nothing after it, which is the
+//     only line in the corpus that exercises the `|$` branch of WORD_END.
+//   - BOUNDARY_PROBE_MISS is the same sentence with the match extended by one
+//     word character. It is what `src/route-matching.ts` genuinely says ("is
+//     safer than"), and it must NOT match -- the boundary has to still refuse a
+//     longer word, or the portable spelling has bought a false positive in
+//     exchange for the false negative it fixed.
+//
+// Assembled from fragments and written to a scratch directory under the OS temp
+// dir, never into the repo: a tracked file containing these lines would be
+// found by the ledger's own grep and assertion 3 could never be satisfied.
+const CLOSE_HERE_PROBE = `Do not ${CLOSE_HERE}, the note said.`;
+const BOUNDARY_PROBE_HIT = `A raw-path ${HOOK_IS_SAFE}`;
+const BOUNDARY_PROBE_MISS = `A raw-path ${HOOK_IS_SAFE}r than an originalUrl one.`;
+
+const PROBE_CORPUS: string[] = [
+  ...RETIRED_CLAIMS.map(([, claim]) => claim),
+  ...RETIRED_CLAIMS_56.map(([, claim]) => claim),
+  ...FALSE_CLOSURES,
+  ...HONEST_DISCLOSURES,
+  CLOSE_HERE_PROBE,
+  BOUNDARY_PROBE_HIT,
+  BOUNDARY_PROBE_MISS
+];
+
+const PROBE_FILE = 'corpus.txt';
+
 // Anchored at the repository root so every path below is independent of the
 // process cwd. `pnpm test` sets cwd to the package root, but nothing about this
 // test should depend on that, and the previous version silently did.
@@ -284,6 +386,32 @@ function gitGrepFiles(pattern: string): string[] {
   }
 }
 
+// The SAME `git grep` binary and the SAME `-E` flag as gitGrepCount(), pointed
+// with `--no-index` at a scratch corpus outside any repository. `--no-index`
+// changes WHAT is searched, not HOW: the pattern is still compiled by git's own
+// ERE engine, which is the thing under test. Verified on git 2.50.1 (Apple
+// Git-155) that `--no-index` reproduces the `\b` -> literal-`b` behaviour
+// exactly, so the control measures the same compiler the ledger's real greps
+// use. Returns matching lines, in file order, so the comparison can be made
+// line-for-line rather than by count.
+//
+// `-P` is deliberately NOT used as an escape hatch here or anywhere in this
+// file: git's PCRE support is a build-time option (`USE_LIBPCRE`), so `-P` is
+// not guaranteed on either the developer's machine or CI, and swapping engines
+// to get `\b` back would trade a silent wrong answer for a hard failure on some
+// third machine. POSIX ERE is the intersection both gits are guaranteed to
+// have; the patterns are written to stay inside it.
+function gitGrepLinesNoIndex(pattern: string, cwd: string, file: string): string[] {
+  try {
+    const stdout = execFileSync('git', ['grep', '--no-index', '-hE', pattern, '--', file], { encoding: 'utf8', cwd });
+    return stdout.split('\n').filter(Boolean);
+  } catch (error) {
+    const { status, stdout } = error as { status?: number; stdout?: string };
+    if (status === 1 && !stdout) return [];
+    throw error;
+  }
+}
+
 function readRepoFile(relativePath: string): string {
   return readFileSync(join(REPO_ROOT, relativePath), 'utf8');
 }
@@ -302,6 +430,41 @@ module('[Acceptance] Tripwire ledger (#54 AC3, #56 AC8)', function() {
     assert.ok(gitGrepCount('canonicalRoutes') > 0, '0. positive control: the same git grep finds `canonicalRoutes`, so a zero below means absent and not broken');
     const controlFiles = gitGrepFiles('canonicalRoutes');
     assert.ok(controlFiles.some(file => !file.startsWith('test/')), `0. positive control: the same grep matches OUTSIDE test/ (${controlFiles.filter(file => !file.startsWith('test/')).join(', ')}), so it proves the grep's SCOPE and not merely that it ran`);
+
+    // 0c/0d. EXPRESSIVENESS CONTROL -- the third thing the zeroes depend on.
+    //
+    // The two assertions above prove the grep ran and that it reached outside
+    // test/. Both use the bare literal `canonicalRoutes`: no alternation, no
+    // interval, no escape. Neither can say anything about whether git's ERE
+    // compiler can EXPRESS the patterns whose zeroes assertion 3 reads as
+    // "absent" -- and it could not. One pattern ended in `\b`, Apple git
+    // compiled that to a literal `b`, and the ledger certified a claim that was
+    // sitting in a tracked file. See WORD_END and the PROBE_CORPUS comment.
+    //
+    // So: run every banned pattern over one corpus with BOTH engines and
+    // require the matched lines to agree. A construct JS honours and this git
+    // does not (or the reverse) produces different match sets and reds here,
+    // BEFORE assertion 3 turns the difference into a false clean bill.
+    const probeDir = mkdtempSync(join(tmpdir(), 'stonyx-ledger-ere-'));
+    const patternsWithoutFixture: string[] = [];
+    const engineDisagreements: string[] = [];
+    try {
+      writeFileSync(join(probeDir, PROBE_FILE), `${PROBE_CORPUS.join('\n')}\n`);
+      for (const pattern of BANNED_PATTERNS) {
+        const byJs = PROBE_CORPUS.filter(line => new RegExp(pattern).test(line));
+        if (byJs.length === 0) patternsWithoutFixture.push(pattern);
+
+        const byGit = gitGrepLinesNoIndex(pattern, probeDir, PROBE_FILE);
+        if (byJs.join('\n') !== byGit.join('\n')) {
+          engineDisagreements.push(`/${pattern}/ -- JS RegExp matched ${byJs.length} probe line(s), \`git grep -E\` matched ${byGit.length}`);
+        }
+      }
+    } finally {
+      rmSync(probeDir, { recursive: true, force: true });
+    }
+
+    assert.deepEqual(patternsWithoutFixture, [], '0c. every banned pattern has at least one positive fixture in the probe corpus, so 0d compares real match sets rather than two empty ones (a pattern with no fixture passes 0d no matter how broken it is)');
+    assert.deepEqual(engineDisagreements, [], '0d. `git grep -E` and the JS RegExp engine agree line-for-line on every banned pattern over the probe corpus. A red here means the local git cannot express a construct this file relies on -- `\\b`, `\\d`, `\\s`, `\\w`, a lookaround, a backreference, a non-greedy quantifier -- and therefore that a zero from assertion 3 no longer means "absent"');
 
     // 1. The ban is scoped to the claims it retired, and the scoping did not
     // disarm it: every one of the 8 hits the unscoped grep returned on
@@ -338,10 +501,28 @@ module('[Acceptance] Tripwire ledger (#54 AC3, #56 AC8)', function() {
     // an octet outside `[A-Za-z0-9-._~]` that is still TRUE.
     //
     // Replayed against BANNED_PATTERNS, not STALE_CLAIM_PATTERNS: an honest
-    // disclosure has to survive the false-closure half too. That half bans
-    // "a raw-path hook is safe", and entry 2 says a raw-path hook is a live
-    // finding -- adjacent sentences with opposite truth values, which is
-    // exactly where an over-broad Rule-5 pattern would do its damage.
+    // disclosure has to survive the false-closure half too. That half bans the
+    // reassurance phrasings enumerated in FALSE_CLOSURES -- a raw-path hook
+    // paired with one of the verbs listed in FALSE_CLOSURE_PATTERNS[1] -- while
+    // entry 2 below says a raw-path hook is a live finding. Adjacent sentences
+    // with opposite truth values, which is exactly where an over-broad Rule-5
+    // pattern would do its damage.
+    //
+    // THE BANNED SENTENCE IS DELIBERATELY NOT QUOTED HERE, and that omission is
+    // PR #58's CI failure written down. The previous version of this comment
+    // quoted it verbatim in order to explain the ban. The ban is a plain grep
+    // over TRACKED files and this file is tracked, so the documentation tripped
+    // the guard it was documenting: CI red at assertion 3, 40 pass / 1 fail,
+    // while every local run was green for the unrelated reason recorded at
+    // WORD_END. Every banned phrasing elsewhere in this file is assembled from
+    // fragments for precisely this reason (CLOSED, OPEN, HOOK_IS_SAFE and the
+    // rest); a comment is not exempt from that rule, and prose that needs to
+    // name a banned phrasing must point at the fixture instead of restating it.
+    //
+    // An exclusion for this path was considered and REJECTED. This file is
+    // where the honest-disclosure and false-closure FIXTURES live, so excluding
+    // it from the ban would blind the ban to its own fixtures -- the one place
+    // a wrong phrasing is guaranteed to be checked in.
     for (const disclosure of HONEST_DISCLOSURES) {
       const matched = BANNED_PATTERNS.filter(pattern => new RegExp(pattern).test(disclosure));
       assert.deepEqual(matched, [], `2. an honest #56 disclosure is not banned: "${disclosure}"`);
@@ -493,6 +674,22 @@ module('[Acceptance] Tripwire ledger (#54 AC3, #56 AC8)', function() {
       ['docs/agents/security-reviewer.md', securityBrief]
     ] as const;
 
+    // THESE TWO KEEP `\b` AND `\s+`, AND THE EXCEPTION IS LOAD-BEARING RATHER
+    // THAN AN OVERSIGHT. Everything in BANNED_PATTERNS is a STRING, because it
+    // is compiled by both JS and `git grep -E`, and must therefore stay inside
+    // POSIX ERE (see WORD_END). The two below are RegExp LITERALS that only
+    // ever reach `.test()` on a file's contents -- no git grep, one engine, so
+    // `\b` and `\s+` mean what they say. `\s+` in particular has no spelling
+    // usable in both engines: the portable ERE form is `[[:space:]]`, which git
+    // reads as the POSIX space class and JS parses as the character class
+    // `[[:space:]` followed by a LITERAL `]` -- measured, `/^[[:space:]]$/`
+    // matches the two-character string `s]` and does not match a tab. So a
+    // single shared spelling does not exist, and "fixing" these would break
+    // them. The type system is the guard that keeps the exception honest --
+    // `gitGrepCount(pattern: string)` will not accept a RegExp, so neither of
+    // these can drift into the grep path without a `pnpm typecheck` failure,
+    // and typecheck runs as part of `pnpm test`.
+    //
     // `req.params` and "sound" inside one sentence (`[^.]` stops at the
     // sentence-ending period, and also at the dot in `req.params` itself, hence
     // both orderings).
