@@ -472,6 +472,21 @@ module('[Acceptance] Tripwire ledger (#54 AC3, #56 AC8)', function() {
     // and as a tripwire on enumerated phrasings rather than as coverage of the
     // claim (12 of 15 rephrasings still escape it; see that comment). Do not
     // restore the claim that this block catches a false closure; it never did.
+    //
+    // Nor can it see a NARROW RESTATEMENT SOMEWHERE ELSE IN THE SAME FILE. Every
+    // marker here is a WHOLE-FILE presence check: it reads the artifact as one
+    // string and asks whether the wider class appears anywhere in it. So a row
+    // in a table, or a paragraph in a later section, that re-scopes the residual
+    // back to "reserved characters" satisfies this block unchanged -- the file
+    // still contains the wider-class sentence elsewhere, so the regex still
+    // matches and nothing reds. That is exactly what happened: PR #58 shipped a
+    // second round with README.md's Consumer Contracts row still scoped to
+    // reserved characters, and this block was green throughout. It was found by
+    // reading, not by a check. Making the markers row-aware (per table row, per
+    // section) is a real improvement and deliberately NOT made here -- it is a
+    // larger and unmeasured change than the fix round it would have ridden in
+    // on. Until then: this block guards that the wider class is stated in each
+    // artifact, NOT that it is stated consistently everywhere within one.
     const RESIDUAL_ARTIFACTS = [
       ['README.md', readme],
       ['docs/project-structure.md', projectStructure],
