@@ -3,10 +3,6 @@ declare module 'stonyx/config' {
     port: number;
     dir: string;
     camelCaseRoutes?: boolean;
-    caseSensitiveRoutes?: boolean;
-    strictRoutes?: boolean;
-    canonicalRoutes?: boolean;
-    canonicalEncoding?: boolean;
     enableHealthCheck?: boolean;
     origin?: string | string[];
     methods?: string[];

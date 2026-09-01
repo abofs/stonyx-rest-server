@@ -42,7 +42,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^5.1.0",
-    "stonyx": "0.2.3-beta.78"
+    "stonyx": "0.2.3-beta.77"
   },
   "devDependencies": {
     "@stonyx/utils": "0.2.3-beta.26",

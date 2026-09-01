@@ -19,7 +19,6 @@ import express, { type Express, type Request as ExpressRequest, type Response as
 import config from 'stonyx/config';
 import log from 'stonyx/log';
 import { forEachFileImport } from '@stonyx/utils/file';
-import applyRouteMatching from './route-matching.js';
 import type { Server } from 'http';
 
 export { default as Request } from './request.js';
@@ -35,21 +34,6 @@ export default class RestServer {
     RestServer.instance = this;
 
     this.api = express();
-
-    // Applies BOTH route-matching settings: case sensitive routing
-    // (abofs/stonyx-rest-server#47) and strict routing (#50). The two do not
-    // have the same role at this site:
-    //   - #47: this call closes the mount segment (/PUBLIC/...). The matching
-    //     call in Request's constructor closes sub-paths; both are required.
-    //   - #50: this call closes exactly /health/, the only route registered
-    //     directly on this app. It has NO security role for #50 -- do not
-    //     describe it as having one. Router.prototype.use hardcodes
-    //     `strict: false`, so mount segments are strict-immune, and the call in
-    //     Request's constructor closes the trailing-slash bypass on its own.
-    // Must stay in the constructor: the router is materialized lazily on first
-    // route registration, so applying this after setupRouter() is silently
-    // ineffective. See src/route-matching.ts for the per-site split.
-    applyRouteMatching(this.api);
   }
 
   static close(): void {
