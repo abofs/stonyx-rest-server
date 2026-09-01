@@ -55,8 +55,9 @@ function readRepoFile(relativePath: string): string {
 // must normalise before asserting".
 //
 // Block comments first, then whole-line `//`, then trailing `//`. The trailing
-// case requires whitespace before the `//` so a `://` inside a URL or a string
-// is left alone -- the file legitimately contains path literals.
+// case requires whitespace before the `//` so a `//` that is glued to the
+// character before it -- inside a path literal, a string, a `://` -- is left
+// alone. The file legitimately contains path literals.
 function stripComments(source: string): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -121,10 +122,18 @@ module('[Unit] Config', function() {
     // `notOk` above for the wrong reason. This probe carries a pin and a
     // back-pointer naming the same key in all three comment shapes, and asserts
     // the two are told apart.
+    //
+    // The `marker: 'a//b'` value is the probe for the trailing-comment rule. It
+    // is deliberately NOT a URL: `js/incomplete-url-substring-sanitization`
+    // reads a `.includes()` of a URL-shaped literal as an incomplete host
+    // check and reports it at high severity, and a red CodeQL run on a test
+    // fixture is a red CodeQL run. The property under test is only that a `//`
+    // with no whitespace before it survives stripping, and `a//b` carries that
+    // exactly as well as a URL did. Do not put a URL back here.
     const NORMALISATION_PROBE = [
       '/* canonicalRoutes lives in config/environment.js */',
       '// canonicalEncoding is deliberately NOT pinned here -- see config/environment.js',
-      "const config = { restServer: { dir: './test/sample/requests', docs: 'https://example.test/x' } }; // strictRoutes stays unpinned too",
+      "const config = { restServer: { dir: './test/sample/requests', marker: 'a//b' } }; // strictRoutes stays unpinned too",
       '// caseSensitiveRoutes likewise'
     ].join('\n');
     const normalisedProbe = stripComments(NORMALISATION_PROBE);
@@ -132,7 +141,7 @@ module('[Unit] Config', function() {
       assert.notOk(normalisedProbe.includes(key), `4b. normalisation control: a COMMENT naming ${key} is stripped, so assertion 4 cannot false-red on a back-pointer`);
     }
     assert.ok(normalisedProbe.includes('dir'), '4b. normalisation control: the CODE survives stripping, so assertion 4 would still see a real pin');
-    assert.ok(normalisedProbe.includes('https://example.test/x'), '4b. normalisation control: a `//` inside a string literal is not eaten as a trailing comment (the trailing rule requires whitespace before the `//`)');
+    assert.ok(normalisedProbe.includes("'a//b'"), '4b. normalisation control: a `//` inside a string literal is not eaten as a trailing comment (the trailing rule requires whitespace before the `//`)');
     assert.ok(stripComments('const canonicalEncoding = true;').includes('canonicalEncoding'), '4b. normalisation control: a bare pin with no comment at all is untouched');
 
     // 5. POSITIVE CONTROL for assertion 4, and the reason its four `notOk`s are
