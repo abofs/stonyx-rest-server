@@ -140,27 +140,81 @@ module('[Integration] Rest Server', function(hooks) {
   //
   // Every assertion below is a real HTTP request over a real socket against the
   // real router. Asserting `app.enabled('case sensitive routing')` does NOT
-  // satisfy any of these.
+  // satisfy any of these: express 5's `createApplication()` takes no arguments,
+  // so an `express({ caseSensitive: true })` that changes no behaviour would
+  // pass every config-shaped check.
+  //
+  // Measured: `fetch` does not normalise case, so it is an adequate client here.
   // ---------------------------------------------------------------------------
   module('case-sensitive route matching (#47)', function() {
-    test('AC1 — negative control: correctly-cased routing is untouched', async function(assert) {
-      assert.ok(true, 'TODO stub — replaced in the AC1/AC2 commit');
+    // AC1 — negative control. Without this the story is satisfiable by breaking
+    // all routing to buy the 404s below.
+    test('AC1 — correctly-cased routing is untouched', async function(assert) {
+      const success = await fetch(`${endpoint}/public/success`);
+      assert.equal(success.status, 200, 'GET /public/success -> 200');
+      assert.equal(await success.text(), 'OK', 'GET /public/success body is OK');
+
+      const params = await fetch(`${endpoint}/public/url-params/foo/bar/baz`);
+      assert.equal(params.status, 200, 'GET /public/url-params/foo/bar/baz -> 200');
+      assert.deepEqual(await params.json(), { x: 'foo', y: 'bar', z: 'baz' }, 'url params still bind');
+
+      const health = await fetch(`${endpoint}/health`);
+      assert.equal(health.status, 200, 'GET /health -> 200');
     });
 
-    test('AC2 — negative control: the auth hook still fires on the canonical path', async function(assert) {
-      assert.ok(true, 'TODO stub — replaced in the AC1/AC2 commit');
+    // AC2 — negative control. Turns red if the fix reorders registerCalls()
+    // relative to the auth wrapper in src/request.ts.
+    test('AC2 — the auth hook still fires on the canonical path', async function(assert) {
+      const denied = await fetch(`${endpoint}/private/failure`);
+      assert.equal(denied.status, 505, 'GET /private/failure -> 505, auth hook fires');
+
+      const allowed = await fetch(`${endpoint}/private/success`);
+      assert.equal(allowed.status, 200, 'GET /private/success -> 200');
+      assert.deepEqual(await allowed.json(), { data: 'foo' }, 'GET /private/success body');
     });
 
-    test('AC3 — mount-segment case is rejected (src/main.ts construction site)', async function(assert) {
-      assert.ok(true, 'TODO stub — replaced in the AC3/AC4/AC5 commit');
+    // AC3 — the src/main.ts construction site. Measured on origin/dev: all
+    // three return 200.
+    test('AC3 — mount-segment case is rejected (src/main.ts site)', async function(assert) {
+      const publicMount = await fetch(`${endpoint}/PUBLIC/success`);
+      assert.equal(publicMount.status, 404, 'GET /PUBLIC/success -> 404');
+
+      const privateMount = await fetch(`${endpoint}/PRIVATE/failure`);
+      assert.equal(privateMount.status, 404, 'GET /PRIVATE/failure -> 404');
+
+      const health = await fetch(`${endpoint}/HEALTH`);
+      assert.equal(health.status, 404, 'GET /HEALTH -> 404');
     });
 
-    test('AC4 — sub-path case is rejected (src/request.ts construction site)', async function(assert) {
-      assert.ok(true, 'TODO stub — replaced in the AC3/AC4/AC5 commit');
+    // AC4 — the src/request.ts construction site, and the one a partial fix
+    // misses. A parent-only fix, or a set placed after registerCalls(), passes
+    // AC3 and returns 200 here. public.ts is used deliberately: it registers no
+    // bare '/:id', so a miss is a true 404.
+    test('AC4 — sub-path case is rejected (src/request.ts site)', async function(assert) {
+      const success = await fetch(`${endpoint}/public/SUCCESS`);
+      assert.equal(success.status, 404, 'GET /public/SUCCESS -> 404');
+
+      const bind = await fetch(`${endpoint}/public/BIND`);
+      assert.equal(bind.status, 404, 'GET /public/BIND -> 404');
     });
 
+    // AC5 — the security-relevant assertion. The status stays 200 before AND
+    // after the fix, because private.ts registers '/:id' which absorbs the
+    // miss; asserting 404 here would be wrong. Assert handler identity instead.
     test('AC5 — a case-varied path cannot reach a handler the auth hook denies', async function(assert) {
-      assert.ok(true, 'TODO stub — replaced in the AC3/AC4/AC5 commit');
+      const response = await fetch(`${endpoint}/private/FAILURE`);
+      const body = await response.json();
+
+      assert.notDeepEqual(
+        body,
+        { data: 'foo' },
+        'GET /private/FAILURE does not reach the 505-denied /failure handler'
+      );
+      assert.deepEqual(
+        body,
+        { data: 'param-route' },
+        'GET /private/FAILURE is absorbed by /:id, not by /failure'
+      );
     });
   });
 
