@@ -37,7 +37,18 @@ export default class Request {
   declare auth?: AuthHandler;
 
   constructor() {
+    const { caseSensitiveRoutes = true } = config.restServer ?? {};
     const api = express();
+
+    // Mount case-sensitively (#47). This site is required in addition to the
+    // one in src/main.ts and is the one a partial fix misses: the parent's
+    // setting does not reach this sub-app, because mountRoute() calls
+    // registerCalls() -- which materialises this router -- before api.use()
+    // mounts it, so the prototype-chained settings inheritance express applies
+    // on mount arrives too late. Parent-only leaves every sub-path open.
+    //
+    // Must also precede registerCalls() for the same lazy-router reason.
+    api.set('case sensitive routing', caseSensitiveRoutes);
     api.disable('x-powered-by');
 
     this.expressInstance = api;

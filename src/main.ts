@@ -33,7 +33,17 @@ export default class RestServer {
     if (RestServer.instance) return RestServer.instance;
     RestServer.instance = this;
 
+    const { caseSensitiveRoutes = true } = config.restServer ?? {};
+
     this.api = express();
+
+    // Mount case-sensitively (#47). Express defaults to case-INSENSITIVE
+    // matching, which dispatches on a looser match than any downstream
+    // authorization predicate uses -- a fail-open by construction. Set here in
+    // the constructor, before setupRouter() registers anything: express
+    // materialises the router lazily on first registration and reads this
+    // setting at that moment, so a later set is silently ineffective.
+    this.api.set('case sensitive routing', caseSensitiveRoutes);
   }
 
   static close(): void {
