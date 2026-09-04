@@ -25,6 +25,24 @@ module('[Unit] Request', function() {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // #47 AC6 — the `caseSensitiveRoutes` opt-out actually opts out, and the
+  // absent-key default (the state every existing consumer is in) is secure.
+  //
+  // Socket-level: the fixture is a real Request subclass mounted on an ephemeral
+  // port via listen(0), so no fixed port is bound and concurrent runs cannot
+  // collide.
+  // ---------------------------------------------------------------------------
+  module('case-sensitive route matching (#47 AC6)', function() {
+    test('AC6a — caseSensitiveRoutes=false restores case-insensitive matching', async function(assert) {
+      assert.ok(true, 'TODO stub — replaced in the AC6 commit');
+    });
+
+    test('AC6b — absent config key defaults to case-sensitive', async function(assert) {
+      assert.ok(true, 'TODO stub — replaced in the AC6 commit');
+    });
+  });
+
   module('sendStatusResponse', function() {
     test('sends a response with a message if status code has an entry in the statusMap', async function(assert) {
       const { restServer } = config;

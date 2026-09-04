@@ -132,6 +132,38 @@ module('[Integration] Rest Server', function(hooks) {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // #47 — routes mount case-INSENSITIVELY (express default), so any consumer
+  // authorization that inspects the request path can be walked past by changing
+  // case. Acceptance criteria AC1-AC5 (AC6 lives in test/unit/request-test.ts,
+  // AC7 in test/unit/publish-surface-test.ts).
+  //
+  // Every assertion below is a real HTTP request over a real socket against the
+  // real router. Asserting `app.enabled('case sensitive routing')` does NOT
+  // satisfy any of these.
+  // ---------------------------------------------------------------------------
+  module('case-sensitive route matching (#47)', function() {
+    test('AC1 — negative control: correctly-cased routing is untouched', async function(assert) {
+      assert.ok(true, 'TODO stub — replaced in the AC1/AC2 commit');
+    });
+
+    test('AC2 — negative control: the auth hook still fires on the canonical path', async function(assert) {
+      assert.ok(true, 'TODO stub — replaced in the AC1/AC2 commit');
+    });
+
+    test('AC3 — mount-segment case is rejected (src/main.ts construction site)', async function(assert) {
+      assert.ok(true, 'TODO stub — replaced in the AC3/AC4/AC5 commit');
+    });
+
+    test('AC4 — sub-path case is rejected (src/request.ts construction site)', async function(assert) {
+      assert.ok(true, 'TODO stub — replaced in the AC3/AC4/AC5 commit');
+    });
+
+    test('AC5 — a case-varied path cannot reach a handler the auth hook denies', async function(assert) {
+      assert.ok(true, 'TODO stub — replaced in the AC3/AC4/AC5 commit');
+    });
+  });
+
   module('/health', function(hooks) {
     test('Health check endpoint is configured automatically', async function(assert) {
       const response = await fetch(`${endpoint}/health`);

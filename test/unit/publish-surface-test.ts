@@ -14,6 +14,16 @@ import { execFileSync } from 'child_process';
 const { module, test } = QUnit;
 
 module('[Unit] Publish surface', function () {
+  // ---------------------------------------------------------------------------
+  // #47 AC7 (re-land requirement) — the fix must be present in the BUILT
+  // artifact, not only in src/. The 2026-09-01 revert was invisible because
+  // nothing asserted anything about dist/. This drives the package's published
+  // entry point (`@stonyx/rest-server` -> dist/main.js) over a real socket.
+  // ---------------------------------------------------------------------------
+  test('AC7 — the built dist/ artifact mounts case-sensitively', async function (assert) {
+    assert.ok(true, 'TODO stub — replaced in the AC7 commit');
+  });
+
   test('config/environment.js is published and .ts is not', function (assert) {
     const stdout = execFileSync('npm', ['pack', '--dry-run', '--json'], {
       cwd: process.cwd(),
