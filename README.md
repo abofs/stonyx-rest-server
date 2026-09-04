@@ -79,8 +79,34 @@ Configuration is read from `stonyx/config` under `restServer`:
 |      `origin`     | **String \| Array** | `'*'`       | CORS origin(s) allowed                                     |
 |    `methods`      | **String**          | `'GET,POST,PATCH,PUT,DELETE'` | CORS allowed methods                              |
 | `enableHealthCheck` |   **Boolean**     | `true`      | Register `GET /health` endpoint (disable via `REST_HEALTH_CHECK_DISABLE=true`) |
+| `caseSensitiveRoutes` |  **Boolean**  | `true`      | Match route paths case-sensitively. Opt out with `REST_CASE_SENSITIVE_ROUTES=false` — see [Case-Sensitive Route Matching](#case-sensitive-route-matching) before you do |
 |  `trustProxy`   |     **Boolean**     | `false`     | Trust reverse proxy headers (e.g. `X-Forwarded-Proto`). Enable via `REST_TRUST_PROXY=true` when running behind a load balancer such as AWS ALB/ELB to ensure correct protocol detection. |
 |    `statusMap`    |      **Object**     | `{}`        | Optional mapping of HTTP status codes to custom messages   |
+
+### Case-Sensitive Route Matching
+
+Routes match **case-sensitively**. `GET /Users` does not reach a route mounted at `/users`; it returns 404.
+
+This is deliberate and is a security property, not a style choice. Express matches case-insensitively by default, but `request.path`, `request.baseUrl` and `request.originalUrl` all preserve the caller's casing — so an `auth` hook written against the path is case-sensitive while the router that dispatched to it is not. A caller who changes the case of a URL then reaches a handler the canonical URL is denied:
+
+```
+GET /private/failure    ->  505   auth hook fires
+GET /private/FAILURE    ->  200   auth hook never fires, guarded handler runs   (default OFF)
+```
+
+A router that matches more loosely than every downstream matcher is a fail-open by construction, so the default is the strict one.
+
+**Note on route casing.** Mount paths come from your request filenames, and both `camelCaseRoutes` settings can produce mixed-case mounts: with `camelCaseRoutes` truthy, `phone-number.ts` mounts at `/phoneNumber`; with it falsy, filenames are used verbatim, so `Users.ts` mounts at `/Users`. Clients must use the exact casing.
+
+**Opting out:**
+
+```bash
+REST_CASE_SENSITIVE_ROUTES=false
+```
+
+This restores Express's default case-insensitive matching. It also re-opens the fail-open above for any authorization that matches on a URL, so treat it as a temporary measure while you fix client casing, not as a setting to leave on.
+
+**Scope.** This makes *route matching* exact. It does not normalise path *parameter values* — a handler or `auth` hook comparing `request.params.id` is still doing its own case-sensitive comparison, and `/private/RESTRICTED` is a different id from `/private/restricted`. Nor does it affect **trailing slashes**: Express's `strict routing` is a separate setting and is still off, so `GET /private/failure/` still matches `/failure` and still bypasses a path-matching `auth` hook. That is tracked separately as [#50](https://github.com/abofs/stonyx-rest-server/issues/50) and is **not** closed by this setting.
 
 ### Running Behind a Load Balancer
 
