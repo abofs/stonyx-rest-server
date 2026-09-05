@@ -79,7 +79,7 @@ Configuration is read from `stonyx/config` under `restServer`:
 |      `origin`     | **String \| Array** | `'*'`       | CORS origin(s) allowed                                     |
 |    `methods`      | **String**          | `'GET,POST,PATCH,PUT,DELETE'` | CORS allowed methods                              |
 | `enableHealthCheck` |   **Boolean**     | `true`      | Register `GET /health` endpoint (disable via `REST_HEALTH_CHECK_DISABLE=true`) |
-| `caseSensitiveRoutes` |  **Boolean**  | `true`      | Match route paths case-sensitively. Opt out with `REST_CASE_SENSITIVE_ROUTES=false` — see [Case-Sensitive Route Matching](#case-sensitive-route-matching) before you do |
+| `caseSensitiveRoutes` |  **Boolean**  | `true`      | Match route paths case-sensitively. Opt out with `restServer.caseSensitiveRoutes: false` (or `REST_CASE_SENSITIVE_ROUTES=false`, devDependencies installs only) — read [Breaking changes](#breaking-changes) before you do |
 |  `trustProxy`   |     **Boolean**     | `false`     | Trust reverse proxy headers (e.g. `X-Forwarded-Proto`). Enable via `REST_TRUST_PROXY=true` when running behind a load balancer such as AWS ALB/ELB to ensure correct protocol detection. |
 |    `statusMap`    |      **Object**     | `{}`        | Optional mapping of HTTP status codes to custom messages   |
 
@@ -87,26 +87,89 @@ Configuration is read from `stonyx/config` under `restServer`:
 
 Routes match **case-sensitively**. `GET /Users` does not reach a route mounted at `/users`; it returns 404.
 
-This is deliberate and is a security property, not a style choice. Express matches case-insensitively by default, but `request.path`, `request.baseUrl` and `request.originalUrl` all preserve the caller's casing — so an `auth` hook written against the path is case-sensitive while the router that dispatched to it is not. A caller who changes the case of a URL then reaches a handler the canonical URL is denied:
+This is deliberate and is a security property, not a style choice. Express matches case-insensitively by default, but `request.path`, `request.baseUrl` and `request.originalUrl` all preserve the caller's casing — so an `auth` hook written against the path is case-sensitive while the router that dispatched to it is not. A caller who changes the case of a URL then reaches a handler the canonical URL is denied.
+
+Measured against this repo's own sample requests, **before this change**:
 
 ```
-GET /private/failure    ->  505   auth hook fires
-GET /private/FAILURE    ->  200   auth hook never fires, guarded handler runs   (default OFF)
+GET /public/SUCCESS   ->  200   the /success handler runs
+GET /PRIVATE/failure  ->  505   the auth hook fires on a path it was never written for
+```
+
+**After this change:**
+
+```
+GET /public/SUCCESS   ->  404
+GET /PRIVATE/failure  ->  404
+GET /public/success   ->  200   canonical paths are untouched
+GET /private/failure  ->  505   canonical paths are untouched
 ```
 
 A router that matches more loosely than every downstream matcher is a fail-open by construction, so the default is the strict one.
 
-**Note on route casing.** Mount paths come from your request filenames, and both `camelCaseRoutes` settings can produce mixed-case mounts: with `camelCaseRoutes` truthy, `phone-number.ts` mounts at `/phoneNumber`; with it falsy, filenames are used verbatim, so `Users.ts` mounts at `/Users`. Clients must use the exact casing.
+> **Why not `GET /private/FAILURE` as the probe?** It returns `200` both before and after, because the sample `private.ts` also registers `/:id`, which absorbs the miss. What changes is *which handler ran* — before, the case-varied URL reached the `/failure` handler that `auth` denies with `505`; after, it can only reach the `/:id` handler. Status alone is not a reliable signal that the fix landed; use `GET /public/SUCCESS` for that.
 
-**Opting out:**
+### Breaking changes
+
+Case-sensitive matching is a **behaviour change**. Requests that previously reached a route now return 404.
+
+**Who is affected:**
+
+* Any client sending a URL whose case does not exactly match the mounted path — hand-written links, bookmarked or cached URLs, third-party callers, anything that upper-cases path segments.
+* Any app with a capitalised or hyphenated request filename. Mount paths come from filenames, and `camelCaseRoutes` never lower-cases anything: it only upper-cases the letter following a `-`. So `Users.ts` mounts at `/Users` under **both** `camelCaseRoutes` settings, including the default `true`, and `phone-number.ts` mounts at `/phoneNumber` under the default. Clients that hardcode `/users` or `/phonenumber` start 404ing.
+* Anything matching the URL downstream of the router — reverse proxies, WAF path rules, analytics path grouping, `originalUrl`-based routing.
+* `GET /HEALTH` no longer answers. Only `GET /health` does.
+
+**The symptom.** Express's default 404, with **no log line and no stack** — `RestServer` registers no 404 handler, so nothing is emitted server-side:
+
+```
+HTTP/1.1 404 Not Found
+Content-Type: text/html; charset=utf-8
+
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Error</title></head>
+<body><pre>Cannot GET /public/SUCCESS</pre></body></html>
+```
+
+If routes appear to have vanished after upgrading, `Cannot GET` in the response body is the only string to grep for. Silence in the logs is expected here and is not evidence of a dropped route or a bad build.
+
+**Before you upgrade,** list your actual mount paths and compare them against the URLs your clients send:
 
 ```bash
+ls requests/    # every filename becomes a mount path
+```
+
+Any filename that is not already all-lowercase — and any hyphenated filename under the default `camelCaseRoutes: true` — produces a mixed-case mount that now requires exact casing from callers.
+
+**Opting out (temporary).** Two forms, and they are **not** interchangeable:
+
+```js
+// config/environment.js in YOUR app — works for every install shape
+export default {
+  restServer: { caseSensitiveRoutes: false }
+};
+```
+
+```bash
+# environment variable — only effective when @stonyx/rest-server is in your devDependencies
 REST_CASE_SENSITIVE_ROUTES=false
 ```
 
-This restores Express's default case-insensitive matching. It also re-opens the fail-open above for any authorization that matches on a URL, so treat it as a temporary measure while you fix client casing, not as a setting to leave on.
+The environment variable is read by this module's own `config/environment.js`, and the Stonyx module loader merges that file only for `@stonyx/*` packages listed in your **`devDependencies`**. If you install `@stonyx/rest-server` into `dependencies`, the file is never loaded and the variable is inert. The config-object form wins in both install shapes, so prefer it.
 
-**Scope.** This makes *route matching* exact. It does not normalise path *parameter values* — a handler or `auth` hook comparing `request.params.id` is still doing its own case-sensitive comparison, and `/private/RESTRICTED` is a different id from `/private/restricted`. Nor does it affect **trailing slashes**: Express's `strict routing` is a separate setting and is still off, so `GET /private/failure/` still matches `/failure` and still bypasses a path-matching `auth` hook. That is tracked separately as [#50](https://github.com/abofs/stonyx-rest-server/issues/50) and is **not** closed by this setting.
+Either form restores Express's default case-insensitive matching. It also re-opens the **case-variant fail-open** described above for any authorization that matches on a URL, so treat it as a temporary measure while you fix client casing, not as a setting to leave on. It has no effect on the other residuals below, which are open either way.
+
+**Scope.** This makes *route matching* exact on the **case axis only**. It closes [#47](https://github.com/abofs/stonyx-rest-server/issues/47) and nothing else. The following are known-open members of the same loose-matching family. None is closed by this setting, and this list is the residual risk that is currently *tracked* — not a statement that URL matching is otherwise exact.
+
+* **Path parameter values — [#69](https://github.com/abofs/stonyx-rest-server/issues/69).** Route matching is exact, but the router will deliver a `:param` value in any casing, and a hook comparing `request.params.id` is doing its own case-sensitive comparison against it. This is a **bypass**, not a normalisation nicety. Measured against this repo's sample `private.ts`, whose hook is `if (request.params?.id === 'restricted') return 403`:
+
+  ```
+  GET /private/restricted   ->  403 Forbidden
+  GET /private/RESTRICTED   ->  200 {"data":"param-route"}   guarded handler runs
+  ```
+
+* **Trailing slashes — [#50](https://github.com/abofs/stonyx-rest-server/issues/50).** Express's `strict routing` is a separate setting and is still off, so `GET /private/failure/` still matches `/failure` and still bypasses a path-matching `auth` hook.
+* **Mount-root trailing slash and absolute-form request targets — [#54](https://github.com/abofs/stonyx-rest-server/issues/54).** Both are seen by an `originalUrl`-matching hook as a different string from the canonical URL.
+* **Percent-encoding — [#56](https://github.com/abofs/stonyx-rest-server/issues/56).** `GET /enc/%73ecret` reaches the handler that `GET /enc/secret` is denied, defeating hooks written against `req.path` and against `originalUrl` alike.
 
 ### Running Behind a Load Balancer
 
@@ -174,7 +237,7 @@ project-root/
 * `public.js` — contains public-facing routes without authentication
 * `private.js` — contains routes with authentication via the `auth` hook
 
-The `RestServer` will automatically mount these routes using the filenames as paths (`/public` and `/private` by default, or camelCased if configured).
+The `RestServer` will automatically mount these routes using the filenames as paths (`/public` and `/private` by default, or verbatim if `camelCaseRoutes` is disabled).
 
 ### Example Requests
 
