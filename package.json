@@ -4,7 +4,7 @@
     "stonyx-async",
     "stonyx-module"
   ],
-  "version": "0.2.1-beta.120",
+  "version": "0.2.1-beta.121",
   "description": "Rest Server Module for Stonyx Framework",
   "repository": {
     "type": "git",
@@ -42,10 +42,10 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^5.1.0",
-    "stonyx": "0.2.3-beta.92"
+    "stonyx": "0.2.3-beta.93"
   },
   "devDependencies": {
-    "@stonyx/utils": "0.2.3-beta.26",
+    "@stonyx/utils": "0.2.3-beta.27",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.6",
     "@types/node": "^25.5.2",
