@@ -33,7 +33,22 @@ export default class RestServer {
     if (RestServer.instance) return RestServer.instance;
     RestServer.instance = this;
 
+    // Only an explicit `false` opts out. A destructuring default fires on
+    // `undefined` alone, so a config carrying null/0/'' would skip it and set
+    // the flag falsy -- a silent fail-open into the exact hole this closes
+    // (measured: null, 0 and '' all restored case-INSENSITIVE matching).
+    // This mirrors config/environment.js's `REST_CASE_SENSITIVE_ROUTES !== 'false'`.
+    const caseSensitiveRoutes = config.restServer?.caseSensitiveRoutes !== false;
+
     this.api = express();
+
+    // Mount case-sensitively (#47). Express defaults to case-INSENSITIVE
+    // matching, which dispatches on a looser match than any downstream
+    // authorization predicate uses -- a fail-open by construction. Set here in
+    // the constructor, before setupRouter() registers anything: express
+    // materialises the router lazily on first registration and reads this
+    // setting at that moment, so a later set is silently ineffective.
+    this.api.set('case sensitive routing', caseSensitiveRoutes);
   }
 
   static close(): void {

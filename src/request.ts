@@ -37,7 +37,23 @@ export default class Request {
   declare auth?: AuthHandler;
 
   constructor() {
+    // Only an explicit `false` opts out. A destructuring default fires on
+    // `undefined` alone, so a config carrying null/0/'' would skip it and set
+    // the flag falsy -- a silent fail-open into the exact hole this closes
+    // (measured: null, 0 and '' all restored case-INSENSITIVE matching).
+    // This mirrors config/environment.js's `REST_CASE_SENSITIVE_ROUTES !== 'false'`.
+    const caseSensitiveRoutes = config.restServer?.caseSensitiveRoutes !== false;
     const api = express();
+
+    // Mount case-sensitively (#47). This site is required in addition to the
+    // one in src/main.ts and is the one a partial fix misses: the parent's
+    // setting does not reach this sub-app, because mountRoute() calls
+    // registerCalls() -- which materialises this router -- before api.use()
+    // mounts it, so the prototype-chained settings inheritance express applies
+    // on mount arrives too late. Parent-only leaves every sub-path open.
+    //
+    // Must also precede registerCalls() for the same lazy-router reason.
+    api.set('case sensitive routing', caseSensitiveRoutes);
     api.disable('x-powered-by');
 
     this.expressInstance = api;
