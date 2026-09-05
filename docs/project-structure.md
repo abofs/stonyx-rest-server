@@ -17,7 +17,7 @@ REST server module for the Stonyx framework. Provides dynamic route registration
 
 Singleton class wrapping an Express 5 instance.
 
-- **Constructor** — enforces singleton via `RestServer.instance`; creates the Express app with `new express()`
+- **Constructor** — enforces singleton via `RestServer.instance`; creates the Express app with `express()`, then sets `case sensitive routing` from `config.restServer.caseSensitiveRoutes` (default `true`). The set is in the constructor because it is load-bearing there: express materialises the router lazily on first route registration and reads the setting at that moment, so any set after `setupRouter()` is silently ineffective (#47)
 - **`init()`** — calls `setupRouter()`, then starts listening on the configured port
 - **`setupRouter()`** — calls `setupGlobalMiddleware()`, then uses `forEachFileImport` (from `@stonyx/utils/file`) to dynamically import all files in the configured `dir` and mount each as a route via `mountRoute()`. Optionally registers a `/health` endpoint.
 - **`setupGlobalMiddleware()`** — attaches `cors()` and `express.json()` middleware to the Express app
@@ -28,7 +28,7 @@ Singleton class wrapping an Express 5 instance.
 
 Base class for route definitions. Each file in the requests directory exports a class extending `Request`.
 
-- **Constructor** — creates a child Express instance with `x-powered-by` disabled
+- **Constructor** — creates a child Express instance, sets `case sensitive routing` on it from `config.restServer.caseSensitiveRoutes`, and disables `x-powered-by`. This is the second of the two required sites and the one a partial fix misses: `mountRoute()` calls `registerCalls()` — which materialises this router — before `api.use()` mounts it, so express's mount-time settings inheritance from the parent arrives too late. Parent-only leaves every sub-path case-insensitive (#47)
 - **`handlers`** — instance property: object mapping HTTP methods (`get`, `post`, `put`, `delete`, `patch`) to route-path/handler pairs
 - **`auth(req, state)`** — optional hook. Return an integer status code to reject the request; return nothing to allow it through.
 - **`authorization(req, res, next)`** — wrapper that calls `auth()` and short-circuits with a status response if it returns a code
@@ -51,7 +51,7 @@ From `config/environment.js`. All values are overridable via environment variabl
 | Option              | Type              | Default                       | Env Var                    | Description                                                     |
 |---------------------|-------------------|-------------------------------|----------------------------|-----------------------------------------------------------------|
 | `enableHealthCheck` | **Boolean**       | `true`                        | `REST_HEALTH_CHECK_DISABLE=true` to disable | Registers `GET /health` returning 200                     |
-| `caseSensitiveRoutes` | **Boolean**     | `true`                        | `REST_CASE_SENSITIVE_ROUTES=false` to disable | Sets express `case sensitive routing` on the `RestServer` api instance (`src/main.ts`) **and** on every `Request` sub-app (`src/request.ts`). Both sites are required: `mountRoute()` calls `registerCalls()` before `api.use()`, so the child router is already materialised by the time express's mount-time settings inheritance runs. Both sets live in constructors, because express reads this setting when it lazily builds the router on first route registration — a later set is silently ineffective. See rest-server#47 |
+| `caseSensitiveRoutes` | **Boolean**     | `true`                        | `REST_CASE_SENSITIVE_ROUTES=false` to disable | Match route paths case-sensitively. Set at both express construction sites; see the constructor bullets above for why both are required and why placement is load-bearing (#47) |
 | `trustProxy`        | **Boolean**       | `false`                       | `REST_TRUST_PROXY=true` to enable           | Trust reverse proxy headers (`X-Forwarded-Proto`) for correct protocol detection behind load balancers |
 | `origin`            | **String**        | `'*'`                         | `REST_CORS_ORIGIN`         | CORS allowed origin(s)                                          |
 | `methods`           | **String**        | `'GET,POST,PATCH,PUT,DELETE'` | `REST_CORS_METHODS`        | CORS allowed methods                                            |
