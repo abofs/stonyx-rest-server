@@ -37,8 +37,15 @@ module('[Unit] Request', function() {
   // listen(0) port, so no fixed port is bound and concurrent runs cannot collide
   // on 2666 (see #44 / #43).
   //
-  // Turns red if the flag is not read at all (a hardcoded `true` fails AC6a) or
-  // if the default is inverted (fails AC6b).
+  // Coverage each half actually provides, per the Phase 4 mutation table -- AC6a
+  // does NOT prove the flag is read, because case-insensitive is express's own
+  // default, so its 200/200 is satisfied whether the flag is honoured, ignored,
+  // or never read:
+  //   AC6a  catches only a value hardcoded `true` at BOTH construction sites
+  //         (a hardcode at src/main.ts alone leaves the suite green -- see #71)
+  //   AC6b  catches an inverted absent-key default
+  //   AC6c  catches a reverted read that treats falsy-but-not-false as opt-out
+  // AC6b and AC6c are the load-bearing halves; AC6a is the opt-out control.
   // ---------------------------------------------------------------------------
   module('case-sensitive route matching (#47 AC6)', function() {
     class CaseFixture extends Request {
@@ -88,6 +95,37 @@ module('[Unit] Request', function() {
         assert.equal(varied, 200, 'GET /SUCCESS -> 200, the opt-out really opts out');
       } finally {
         restServer.caseSensitiveRoutes = original;
+      }
+    });
+
+    // -------------------------------------------------------------------------
+    // AC6c (#47 fix round -- SME Phase 1 NIT-1). Only an explicit `false` opts
+    // out. The review head read the config with a destructuring default, which
+    // fires on `undefined` alone -- so a config carrying `null`, `0` or `''`
+    // skipped the default and set the express flag falsy. Measured on the
+    // review head, all three restored case-INSENSITIVE matching: a silent
+    // fail-open into the exact hole #47 closes, reachable from a config typo.
+    //
+    // Turns red if the read reverts to a destructuring default, or to any
+    // truthiness check.
+    // -------------------------------------------------------------------------
+    test('AC6c — a falsy-but-not-false config value does not silently disable the fix', async function(assert) {
+      const { restServer } = config;
+      const had = 'caseSensitiveRoutes' in restServer;
+      const original = restServer.caseSensitiveRoutes;
+
+      try {
+        for (const value of [null, 0, '', NaN] as unknown[]) {
+          (restServer as unknown as Record<string, unknown>).caseSensitiveRoutes = value;
+
+          const [canonical, varied] = await probe(['/success', '/SUCCESS']);
+
+          assert.equal(canonical, 200, `GET /success -> 200 with caseSensitiveRoutes=${String(value)}`);
+          assert.equal(varied, 404, `GET /SUCCESS -> 404: ${String(value)} is not an opt-out, only \`false\` is`);
+        }
+      } finally {
+        if (had) restServer.caseSensitiveRoutes = original;
+        else delete restServer.caseSensitiveRoutes;
       }
     });
 

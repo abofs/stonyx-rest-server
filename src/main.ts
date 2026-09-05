@@ -33,7 +33,12 @@ export default class RestServer {
     if (RestServer.instance) return RestServer.instance;
     RestServer.instance = this;
 
-    const { caseSensitiveRoutes = true } = config.restServer ?? {};
+    // Only an explicit `false` opts out. A destructuring default fires on
+    // `undefined` alone, so a config carrying null/0/'' would skip it and set
+    // the flag falsy -- a silent fail-open into the exact hole this closes
+    // (measured: null, 0 and '' all restored case-INSENSITIVE matching).
+    // This mirrors config/environment.js's `REST_CASE_SENSITIVE_ROUTES !== 'false'`.
+    const caseSensitiveRoutes = config.restServer?.caseSensitiveRoutes !== false;
 
     this.api = express();
 

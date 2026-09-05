@@ -37,7 +37,12 @@ export default class Request {
   declare auth?: AuthHandler;
 
   constructor() {
-    const { caseSensitiveRoutes = true } = config.restServer ?? {};
+    // Only an explicit `false` opts out. A destructuring default fires on
+    // `undefined` alone, so a config carrying null/0/'' would skip it and set
+    // the flag falsy -- a silent fail-open into the exact hole this closes
+    // (measured: null, 0 and '' all restored case-INSENSITIVE matching).
+    // This mirrors config/environment.js's `REST_CASE_SENSITIVE_ROUTES !== 'false'`.
+    const caseSensitiveRoutes = config.restServer?.caseSensitiveRoutes !== false;
     const api = express();
 
     // Mount case-sensitively (#47). This site is required in addition to the
