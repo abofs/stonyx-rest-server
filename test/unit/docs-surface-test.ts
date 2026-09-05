@@ -22,6 +22,7 @@ const readme = read('README.md');
 const projectStructure = read('docs/project-structure.md');
 const securityReviewer = read('docs/agents/security-reviewer.md');
 const packageJson = JSON.parse(read('package.json')) as { files: string[] };
+const environment = read('config/environment.js');
 
 module('[Unit] Documentation surface (#47 fix round)', function () {
   // -------------------------------------------------------------------------
@@ -115,14 +116,67 @@ module('[Unit] Documentation surface (#47 fix round)', function () {
   });
 
   // -------------------------------------------------------------------------
-  // Phase 5 MED-3 -- README:82 says camelCaseRoutes defaults to true; the
-  // Example Project Structure section said camelCase applies only "if
-  // configured". Cosmetic before this PR; load-bearing now that mount casing
-  // decides 200 vs 404.
+  // Phase 5 MED-3, re-resolved by Phase 5 re-verification NEW-1.
+  //
+  // MED-3 named a real contradiction -- the options table claimed
+  // `camelCaseRoutes` defaults to `true` while the prose said camelCase applied
+  // only "if configured" -- but resolved it toward the WRONG side. The table is
+  // the side that was false: `config/environment.js` declares no
+  // `camelCaseRoutes` key at all, so `src/main.ts` destructures `undefined` and
+  // passes `rawName: !camelCaseRoutes` === `true`. Verbatim filenames is the
+  // SHIPPED DEFAULT. Measured over a raw socket against the real mounted app,
+  // with a `phone-number.ts` fixture and nothing setting the flag:
+  //
+  //   camelCaseRoutes unset  ->  GET /phone-number 200,  GET /phoneNumber 404
+  //   camelCaseRoutes false  ->  GET /phone-number 200,  GET /phoneNumber 404
+  //   camelCaseRoutes true   ->  GET /phone-number 404,  GET /phoneNumber 200
+  //   /Users 200 and /users 404 under all three -- kebabToCase only ever
+  //   UPPER-cases, so `Users.ts` is unaffected by the setting.
+  //
+  // The predecessor of this test asserted the literal `\`true\`` default, which
+  // meant it could only ever go RED when someone CORRECTED the README. A guard
+  // that enforces a false claim converts a doc error into a maintained
+  // invariant. So this DERIVES the expected default from `config/environment.js`
+  // -- the same technique the publish-surface premise above uses against
+  // package.json -- and fails when the doc and the config disagree in EITHER
+  // direction: add a `camelCaseRoutes` default to the config without updating
+  // the table and it goes red; print a boolean default in the table without one
+  // in the config and it goes red.
   // -------------------------------------------------------------------------
-  test('MED-3 — the README does not contradict its own camelCaseRoutes default', function (assert) {
-    assert.ok(/\| `camelCaseRoutes` \|.*\| `true` +\|/.test(readme), 'the options table still documents the true default');
-    assert.notOk(/or camelCased if configured/.test(readme), 'the prose no longer implies camelCase is opt-in');
+  test('MED-3 / NEW-1 — the documented camelCaseRoutes default is derived from config/environment.js', function (assert) {
+    const declared = /^\s*camelCaseRoutes:\s*(.+?),?\s*$/m.exec(environment)?.[1];
+
+    const row = readme.split('\n').find(line => /^\|\s*`camelCaseRoutes`\s*\|/.test(line));
+    assert.ok(row, 'the README options table has a camelCaseRoutes row');
+
+    const defaultCell = (row ?? '').split('|')[3]?.trim() ?? '';
+
+    if (declared === undefined) {
+      assert.notOk(
+        /`(true|false)`/.test(defaultCell),
+        `config/environment.js declares no camelCaseRoutes, so the table must not print a boolean default (cell: ${defaultCell})`
+      );
+      assert.ok(
+        /unset|none|no default/i.test(defaultCell),
+        `the table records that there is no default (cell: ${defaultCell})`
+      );
+      assert.ok(/used \*\*verbatim\*\*|used verbatim/.test(readme), 'the README states filenames are used verbatim');
+    } else {
+      assert.ok(
+        defaultCell.includes(`\`${declared}\``),
+        `the table prints the default config/environment.js actually sets (${declared}; cell: ${defaultCell})`
+      );
+    }
+
+    // The worked example in Breaking changes has to agree with the same source.
+    const camelCaseIsDefault = declared !== undefined && declared !== 'false';
+    const documentedMount = /`phone-number\.ts` mounts at `(\/[A-Za-z-]+)`/.exec(readme)?.[1];
+
+    assert.equal(
+      documentedMount,
+      camelCaseIsDefault ? '/phoneNumber' : '/phone-number',
+      'the phone-number.ts worked example names the mount path the config actually produces'
+    );
   });
 
   // -------------------------------------------------------------------------

@@ -74,7 +74,7 @@ Configuration is read from `stonyx/config` under `restServer`:
 |       Option      |         Type        | Default     | Description                                                |
 | :---------------: | :-----------------: | :---------- | :--------------------------------------------------------- |
 |       `dir`       |      **String**     | `'./requests'` | Directory containing request classes to mount as routes    |
-| `camelCaseRoutes` |     **Boolean**     | `true`      | Convert filenames to camelCase when generating route paths |
+| `camelCaseRoutes` |     **Boolean**     | *(unset — `config/environment.js` sets no default)* | When explicitly `true`, converts hyphenated filenames to camelCase when generating route paths. Unset, so filenames are used **verbatim** |
 |       `port`      |      **Number**     | `2666`      | Port to listen on                                          |
 |      `origin`     | **String \| Array** | `'*'`       | CORS origin(s) allowed                                     |
 |    `methods`      | **String**          | `'GET,POST,PATCH,PUT,DELETE'` | CORS allowed methods                              |
@@ -116,7 +116,7 @@ Case-sensitive matching is a **behaviour change**. Requests that previously reac
 **Who is affected:**
 
 * Any client sending a URL whose case does not exactly match the mounted path — hand-written links, bookmarked or cached URLs, third-party callers, anything that upper-cases path segments.
-* Any app with a capitalised or hyphenated request filename. Mount paths come from filenames, and `camelCaseRoutes` never lower-cases anything: it only upper-cases the letter following a `-`. So `Users.ts` mounts at `/Users` under **both** `camelCaseRoutes` settings, including the default `true`, and `phone-number.ts` mounts at `/phoneNumber` under the default. Clients that hardcode `/users` or `/phonenumber` start 404ing.
+* Any app with a capitalised or hyphenated request filename. Mount paths come from filenames, and `camelCaseRoutes` never lower-cases anything: it only upper-cases the letter following a `-`. So `Users.ts` mounts at `/Users` under **both** `camelCaseRoutes` settings, including the default. `phone-number.ts` mounts at `/phone-number` by default — `config/environment.js` declares no `camelCaseRoutes` key, so filenames are used verbatim — and at `/phoneNumber` only if you have explicitly set `camelCaseRoutes: true`. Clients that hardcode `/users` or `/phonenumber` start 404ing.
 * Anything matching the URL downstream of the router — reverse proxies, WAF path rules, analytics path grouping, `originalUrl`-based routing.
 * `GET /HEALTH` no longer answers. Only `GET /health` does.
 
@@ -138,7 +138,7 @@ If routes appear to have vanished after upgrading, `Cannot GET` in the response 
 ls requests/    # every filename becomes a mount path
 ```
 
-Any filename that is not already all-lowercase — and any hyphenated filename under the default `camelCaseRoutes: true` — produces a mixed-case mount that now requires exact casing from callers.
+Any filename that is not already all-lowercase produces a mixed-case mount that now requires exact casing from callers. Hyphenated filenames are **not** affected by default, because `camelCaseRoutes` is unset and filenames are used verbatim; they are only at risk if you have explicitly set `camelCaseRoutes: true`, which mounts `phone-number.ts` at `/phoneNumber`.
 
 **Opting out (temporary).** Two forms, and they are **not** interchangeable:
 
@@ -237,7 +237,7 @@ project-root/
 * `public.js` — contains public-facing routes without authentication
 * `private.js` — contains routes with authentication via the `auth` hook
 
-The `RestServer` will automatically mount these routes using the filenames as paths (`/public` and `/private` by default, or verbatim if `camelCaseRoutes` is disabled).
+The `RestServer` will automatically mount these routes using the filenames as paths (`/public` and `/private` by default, or camelCased if `camelCaseRoutes` is enabled).
 
 ### Example Requests
 
