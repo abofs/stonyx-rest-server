@@ -216,4 +216,25 @@ module('[Unit] Documentation surface (#47)', function () {
     assert.ok(section.includes('REST_CASE_SENSITIVE_ROUTES'), 'the section names the env var that disables it');
     assert.ok(/#47/.test(section), 'the section links the fail-open the setting closes');
   });
+
+  // docs/security.md is not published (see the first test), so the README is
+  // the only route a consumer has to it. A relative link would 404 on npm.
+  test('the published README links docs/security.md by absolute URL', function (assert) {
+    assert.ok(
+      readme.includes('https://github.com/abofs/stonyx-rest-server/blob/dev/docs/security.md'),
+      'README links the security notes with an absolute GitHub URL'
+    );
+  });
+
+  test('the README lists package entry points under "## Exports"', function (assert) {
+    const section = readme.split(/^## Exports$/m)[1]?.split(/^## /m)[0] ?? '';
+
+    const keys = Object.keys((JSON.parse(read('package.json')) as { exports: Record<string, unknown> }).exports);
+
+    assert.ok(keys.length > 0, 'package.json declares exports');
+    for (const key of keys) {
+      const specifier = `@stonyx/rest-server${key.slice(1)}`;
+      assert.ok(section.includes(`\`${specifier}\``), `the Exports section lists ${specifier}`);
+    }
+  });
 });

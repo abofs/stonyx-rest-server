@@ -15,11 +15,23 @@ REST server module for the [Stonyx framework](https://github.com/abofs/stonyx), 
 * **Singleton server:** Only one RestServer instance runs, preventing accidental multiple listeners.
 * **Framework integration:** Works seamlessly as part of the Stonyx framework—auto-initialized with the rest of your modules.
 
-## Usage reference
+## Exports
 
-The sample request classes in [`test/sample/`](https://github.com/abofs/stonyx-rest-server/tree/dev/test/sample) are the canonical usage reference for this module; the integration tests run against them. They are not included in the npm package.
+| Import path | What it exports |
+| :--- | :--- |
+| `@stonyx/rest-server` | `RestServer` (default), `Request` (named) |
 
-The package has a single export, `@stonyx/rest-server` (the `RestServer` default export and the named `Request` export). There are no subpath exports.
+There are no subpath exports.
+
+## Samples
+
+The sample request classes in [`test/sample/`](https://github.com/abofs/stonyx-rest-server/tree/dev/test/sample) are the canonical usage reference for the runtime API of a JavaScript consumer: extending `Request`, declaring `handlers`, `auth` and middleware. The integration tests run against them. They are not included in the npm package.
+
+They are not yet a TypeScript reference. Their type imports (`RequestState` and `RouteHandlers` from `../../../src/request.js`, and `express`) resolve only inside this repo, and some handlers are deliberately invalid or failing because the tests exercise those paths. Rewriting the samples for consumers is tracked in [stonyx#121](https://github.com/abofs/stonyx/issues/121) (part C).
+
+## Security notes
+
+[`docs/security.md`](https://github.com/abofs/stonyx-rest-server/blob/dev/docs/security.md) covers the security-relevant behaviour: what an `auth` return value allows (any falsy value, including `0`, lets the request through; a Promise does not), unchecked `state.redirect` targets, the `'*'` CORS default, `trustProxy`, and the `X-Powered-By` header. Read it before you write an `auth` hook or deploy.
 
 ## RestServer
 
