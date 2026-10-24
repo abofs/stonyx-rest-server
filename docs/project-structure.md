@@ -4,40 +4,40 @@
 
 REST server module for the Stonyx framework. Provides dynamic route registration from a file directory, built-in CORS/JSON middleware, per-route authorization hooks, and a structured `Request` base class for defining handlers.
 
-- **Package**: `@stonyx/rest-server` (v0.2.1-beta.1)
+- **Package**: `@stonyx/rest-server`
 - **License**: Apache-2.0
-- **Entry point**: `src/main.js`
+- **Entry point**: `src/main.ts`, built by `tsc` to `dist/main.js` (the only export, `.`)
 - **Module type**: ESM (`"type": "module"`)
 - **Node version**: v24.13.0 (per `.nvmrc`)
 - **Package manager**: pnpm
 
 ## Architecture
 
-### RestServer (src/main.js)
+### RestServer (src/main.ts)
 
 Singleton class wrapping an Express 5 instance.
 
 - **Constructor** — enforces singleton via `RestServer.instance`; creates the Express app with `express()`, then sets `case sensitive routing` from `config.restServer.caseSensitiveRoutes` (default `true`). The set is in the constructor because it is load-bearing there: express materialises the router lazily on first route registration and reads the setting at that moment, so any set after `setupRouter()` is silently ineffective (#47)
 - **`init()`** — calls `setupRouter()`, then starts listening on the configured port
-- **`setupRouter()`** — calls `setupGlobalMiddleware()`, then uses `forEachFileImport` (from `@stonyx/utils/file`) to dynamically import all files in the configured `dir` and mount each as a route via `mountRoute()`. Optionally registers a `/health` endpoint.
+- **`setupRouter()`** — calls `setupGlobalMiddleware()`, then uses `forEachFileImport` (from `@stonyx/utils/file`) to dynamically import all files in the configured `dir` and mount each as a route via `mountRoute()`. Registers `GET /health` after all route files unless `enableHealthCheck` is false.
 - **`setupGlobalMiddleware()`** — attaches `cors()` and `express.json()` middleware to the Express app
-- **`mountRoute(routeClass, { name, options })`** — instantiates the imported Request subclass, wires up the `authorization` middleware if present, calls `registerCalls()`, and mounts the sub-app at `/<filename>`
-- **`RestServer.close()`** — static method to close the server
+- **`mountRoute(routeClass, { name, options })`** — instantiates the imported Request subclass, calls `registerCalls()`, and mounts the sub-app at `/<filename>` (a file named `index` mounts at `/`). Other modules call it through `RestServer.instance.mountRoute(...)` after init: `@stonyx/orm` (`src/setup-rest-server.ts`) and `@stonyx/oauth` (`src/main.ts`). Its signature, the `registerCalls()` contract and the `expressInstance` property are therefore public API
+- **`RestServer.close()`** — static method; calls `server.closeAllConnections()` then `server.close()`. A test that boots the server and does not call it leaves the port bound, and the next run fails with `EADDRINUSE`
 
-### Request (src/request.js)
+### Request (src/request.ts)
 
 Base class for route definitions. Each file in the requests directory exports a class extending `Request`.
 
 - **Constructor** — creates a child Express instance, sets `case sensitive routing` on it from `config.restServer.caseSensitiveRoutes`, and disables `x-powered-by`. This is the second of the two required sites and the one a partial fix misses: `mountRoute()` calls `registerCalls()` — which materialises this router — before `api.use()` mounts it, so express's mount-time settings inheritance from the parent arrives too late. Parent-only leaves every sub-path case-insensitive (#47)
 - **`handlers`** — instance property: object mapping HTTP methods (`get`, `post`, `put`, `delete`, `patch`) to route-path/handler pairs
-- **`auth(req, state)`** — optional hook. Return an integer status code to reject the request; return nothing to allow it through.
-- **`authorization(req, res, next)`** — wrapper that calls `auth()` and short-circuits with a status response if it returns a code
+- **`auth(req, state)`** — optional hook, run inside each route handler after express matches the route, so `req.params` is populated. Return a non-zero integer status code to reject the request; any falsy return allows it. See [security.md](security.md#authorization-hook)
 - **`registerCalls()`** — iterates `handlers`, registers each route on the child Express instance. Supports:
   - Single handler function or array (last element is the main handler, preceding elements are middleware)
-  - Middleware functions are bound to the class instance and executed in order
+  - Middleware functions are bound to the class instance and executed in order; the first one to return a value other than `undefined` stops the stack, and that value is used as the response
   - Integer return = status code response (via `sendStatusResponse`)
   - Object return = JSON response
   - `undefined` return = 200 OK
+  - Any other non-object return = 500
   - Pipe support via `state.pipe` (sets headers and pipes a stream)
 - **`Request.getState(req)`** — attaches/retrieves a `__stonyxState` object on the Express request
 - **`Request.sendStatusResponse(res, status)`** — sends status with optional custom message from `config.restServer.statusMap`
@@ -67,17 +67,17 @@ Additional config used (not rest-server-specific):
 
 ## Test Structure
 
-Tests use **QUnit** and run via `stonyx test` (the `npm test` script).
+Tests use **QUnit**. `pnpm test` builds, typechecks, then runs `test/**/*-test.ts` through `tsx` with `NODE_ENV=test`.
 
-### test/config/environment.js
+### test/config/environment.ts
 Overrides `restServer.dir` to `'./test/sample/requests'` so tests load sample request classes.
 
-### test/unit/request-test.js
+### test/unit/request-test.ts
 Unit tests for `Request` static methods:
 - `getState` — creates/returns state object on request
 - `sendStatusResponse` — sends status with optional `statusMap` message
 
-### test/integration/rest-server-test.js
+### test/integration/rest-server-test.ts
 Integration tests that boot the full server and make HTTP requests:
 - 404 for non-existent routes
 - `/public` — JSON response, 200 OK default, URL params, middleware (success/failure), `this` binding for handlers and middleware
@@ -86,8 +86,8 @@ Integration tests that boot the full server and make HTTP requests:
 
 ### test/sample/requests/
 Sample Request subclasses used by integration tests:
-- `public.js` — `PublicRequest` with various GET handlers demonstrating middleware, params, binding
-- `private.js` — `PrivateRequest` with `auth()` hook that rejects `/failure` with 505
+- `public.ts` — `PublicRequest` with various GET handlers demonstrating middleware, params, binding
+- `private.ts` — `PrivateRequest` with `auth()` hook that rejects `/failure` with 505
 
 ## CI/CD
 
@@ -111,28 +111,36 @@ stonyx-rest-server/
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml                 # PR CI — delegates to shared workflow
-│       └── publish.yml            # NPM publish — delegates to shared workflow
+│       ├── publish.yml            # NPM publish — delegates to shared workflow
+│       └── security-audit.yml     # Dependency audit
 ├── docs/
-│   ├── improvements.md            # Known improvement opportunities
 │   ├── index.md                   # Documentation entry point
 │   ├── project-structure.md       # This file
-│   └── release.md                 # Release instructions
+│   ├── release.md                 # Release instructions
+│   └── security.md                # Security-relevant behaviour
 ├── config/
 │   └── environment.js             # Default config with env var overrides
 ├── src/
-│   ├── main.js                    # RestServer class (singleton, Express wrapper)
-│   └── request.js                 # Request base class (handler registration, auth hook)
+│   ├── main.ts                    # RestServer class (singleton, Express wrapper)
+│   ├── request.ts                 # Request base class (handler registration, auth hook)
+│   └── types/                     # Ambient declarations for stonyx, @stonyx/utils, @stonyx/logs
 ├── test/
 │   ├── config/
-│   │   └── environment.js         # Test config override (dir → test/sample/requests)
+│   │   └── environment.ts         # Test config override (dir → test/sample/requests)
 │   ├── integration/
-│   │   └── rest-server-test.js    # Integration tests (QUnit)
+│   │   ├── readme-examples-test.ts  # README examples executed over a raw socket
+│   │   └── rest-server-test.ts    # Integration tests (QUnit)
 │   ├── sample/
 │   │   └── requests/
-│   │       ├── private.js         # Sample private request with auth hook
-│   │       └── public.js          # Sample public request with middleware demos
-│   └── unit/
-│       └── request-test.js        # Unit tests for Request statics (QUnit)
+│   │       ├── private.ts         # Sample private request with auth hook
+│   │       └── public.ts          # Sample public request with middleware demos
+│   ├── unit/
+│   │   ├── docs-surface-test.ts   # Documentation contract tests
+│   │   ├── main-test.ts           # RestServer unit tests
+│   │   ├── publish-surface-test.ts  # Published-file surface tests
+│   │   └── request-test.ts        # Request unit tests (QUnit)
+│   ├── setup.ts
+│   └── zz-exit-test.ts
 ├── .gitignore
 ├── .npmignore
 ├── .nvmrc                         # Node v24.13.0

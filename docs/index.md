@@ -6,5 +6,5 @@ REST server module for the Stonyx framework. Provides dynamic route registration
 
 - [README](../README.md) -- usage guide, configuration reference, and examples
 - [Project Structure](project-structure.md) -- architecture, file layout, dependencies, and test structure
-- [Improvements](improvements.md) -- known improvement opportunities
+- [Security](security.md) -- security-relevant behaviour: case-sensitive routing, the `auth` hook, response handling, CORS and proxy settings
 - [Release Instructions](release.md)
