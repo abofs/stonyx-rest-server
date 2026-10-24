@@ -7,12 +7,21 @@
 // The file lives in requests/base/ because route discovery reads the requests
 // directory non-recursively: subdirectories are skipped, so this class is never
 // mounted as a route of its own.
+import { timingSafeEqual } from 'node:crypto';
 import { Request, type AuthHandler } from '@stonyx/rest-server';
 
 export const CLIENT_VERSION_HEADER = 'x-client-version';
 
 // Stand-ins for your own config or credential lookup.
-const SAMPLE_TOKEN = 'Bearer sample-token';
+const SAMPLE_TOKEN = Buffer.from('Bearer sample-token');
+
+// Compare credentials in constant time, so response timing does not reveal
+// how much of a guessed token is right. timingSafeEqual throws on buffers of
+// different lengths, hence the length check first.
+function tokenMatches(header: string | undefined): boolean {
+  const given = Buffer.from(header ?? '');
+  return given.length === SAMPLE_TOKEN.length && timingSafeEqual(given, SAMPLE_TOKEN);
+}
 
 async function minimumClientVersion(): Promise<number> {
   await new Promise(resolve => setTimeout(resolve, 1));
@@ -48,7 +57,7 @@ export default class ApiRequest extends Request {
   // is not awaited and the request fails with 500. Put async checks in the
   // constructor middleware above or in handler-array middleware.
   auth: AuthHandler = request => {
-    if (request.get('authorization') !== SAMPLE_TOKEN) return 401;
+    if (!tokenMatches(request.get('authorization'))) return 401;
     return undefined;
   };
 }

@@ -9,6 +9,8 @@
 // they are defined here and served on their own ephemeral port.
 import QUnit from 'qunit';
 import { once } from 'events';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import type { AddressInfo } from 'net';
 import type { Server } from 'http';
 import RestServer, { Request, type AuthHandler, type RouteHandlers } from '@stonyx/rest-server';
@@ -88,6 +90,35 @@ module('[Integration] Sample patterns (stonyx#121 part C)', function(hooks) {
 
       assert.equal(response.status, 200);
       assert.deepEqual(await response.json(), { data: { type: 'accounts', id: '1', attributes: { name: 'Ada' } } });
+    });
+
+    // A wrong token of the same length reaches timingSafeEqual; a shorter or
+    // longer one must be stopped by the length check, because timingSafeEqual
+    // throws on unequal lengths and the request would fail with 500.
+    test('a wrong token gets 401 whatever its length', async function(assert) {
+      const valid = AUTH.authorization;
+      const wrong = {
+        'same length': valid.slice(0, -1) + (valid.endsWith('x') ? 'y' : 'x'),
+        shorter: valid.slice(0, -1),
+        longer: `${valid}x`,
+        empty: ''
+      };
+
+      for (const [label, authorization] of Object.entries(wrong)) {
+        const response = await fetch(`${endpoint}/accounts/1`, { headers: { ...CURRENT, authorization } });
+        await response.arrayBuffer();
+        assert.equal(response.status, 401, `${label} token -> 401`);
+      }
+    });
+
+    // The timing property itself is not observable over HTTP in a test, so
+    // pin the call: a plain `!==` comparison passes every behavioural test.
+    test('the sample compares the token with timingSafeEqual, not !==', function(assert) {
+      const source = readFileSync(resolve('test/sample/requests/base/api-request.ts'), 'utf8');
+
+      assert.ok(/\btimingSafeEqual\(given, SAMPLE_TOKEN\)/.test(source), 'tokenMatches calls timingSafeEqual');
+      assert.ok(/\bauth: AuthHandler = request => \{\s*if \(!tokenMatches\(request\.get\('authorization'\)\)\) return 401;/.test(source), 'auth decides through tokenMatches');
+      assert.notOk(/[!=]==?\s*SAMPLE_TOKEN\b(?!\.length)|authorization'\)\s*[!=]==?/.test(source), 'no direct equality comparison of the header or the token');
     });
 
     // Inverse of the 401 above: without the inherited auth the same request
