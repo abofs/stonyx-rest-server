@@ -19,15 +19,33 @@ REST server module for the [Stonyx framework](https://github.com/abofs/stonyx), 
 
 | Import path | What it exports |
 | :--- | :--- |
-| `@stonyx/rest-server` | `RestServer` (default), `Request` (named) |
+| `@stonyx/rest-server` | `RestServer` (default), `Request` (named); types `RouteHandlers`, `RequestHandler`, `AuthHandler`, `RequestState` |
 
 There are no subpath exports.
 
 ## Samples
 
-The sample request classes in [`test/sample/`](https://github.com/abofs/stonyx-rest-server/tree/dev/test/sample) are the canonical usage reference for the runtime API of a JavaScript consumer: extending `Request`, declaring `handlers`, `auth` and middleware. The integration tests run against them. They are not included in the npm package.
+The request classes in [`test/sample/requests/`](https://github.com/abofs/stonyx-rest-server/tree/dev/test/sample/requests) are the canonical usage reference. They import only `@stonyx/rest-server`, `node:` built-ins and each other, so you can copy them into your app's `requests/` directory:
 
-They are not yet a TypeScript reference. Their type imports (`RequestState` and `RouteHandlers` from `../../../src/request.js`, and `express`) resolve only inside this repo, and some handlers are deliberately invalid or failing because the tests exercise those paths. Rewriting the samples for consumers is tracked in [stonyx#121](https://github.com/abofs/stonyx/issues/121) (part C).
+* **As TypeScript:** copy them unchanged. `stonyx serve` runs them with Node's type stripping, which loads a relative import only by its real file name, so `accounts.ts` imports `./base/api-request.ts`, not `.js`. For `tsc` to accept that specifier, set `"rewriteRelativeImportExtensions": true` and `"noEmit": true` in your `tsconfig.json` (TypeScript 5.7+); the `stonyx new` tsconfig sets neither, and reports `TS5097` without the first. `noEmit` matters because the scaffold's `build` script compiles into the app directory: route discovery loads a `.js` left beside a `.ts` as well, and that stale copy keeps answering after you edit the `.ts`. `stonyx serve` runs the `.ts` files, so `pnpm build` then only type-checks. If you have built before, delete the `.js` files in `requests/`.
+* **As JavaScript:** remove all TypeScript-only syntax (annotations, `interface`, `import type` and inline `type` imports, `!` assertions; `stripTypeScriptTypes` from `node:module` does this), rename each file to `.js`, and change the `.ts` in that relative import to `.js`.
+
+[`test/integration/sample-patterns-test.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/integration/sample-patterns-test.ts) exercises each one over HTTP. [`test/unit/sample-imports-test.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/unit/sample-imports-test.ts) fails if a sample imports anything other than `@stonyx/rest-server`, a `node:` built-in, or another sample file that exists under the exact name imported. The suite itself runs under tsx, which would load a `.js` specifier from a `.ts` file, so that check is what keeps the TypeScript copy loadable by `stonyx serve`. The samples are not included in the npm package.
+
+| How do I… | Sample |
+| :--- | :--- |
+| Run the same middleware (a version gate, say) in front of many routes, and return my own status and JSON body from it | [`base/api-request.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/sample/requests/base/api-request.ts): async middleware added to `this.expressInstance` in the constructor of a base class. Subclasses inherit it. There is no global request hook; this is the pattern |
+| Share one `auth` hook across request classes | [`base/api-request.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/sample/requests/base/api-request.ts), extended by [`accounts.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/sample/requests/accounts.ts). Keep base classes in a subdirectory: route discovery does not recurse, so they are never mounted |
+| Do async work (a lookup) before a handler, and stop the request if it fails | [`accounts.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/sample/requests/accounts.ts): handler-array middleware is awaited; return a status to stop, or set `state` and return `undefined` to continue |
+| Set response headers, or a status other than 200 with a JSON body | [`widgets.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/sample/requests/widgets.ts): `request.res` in a handler for one route, `this.expressInstance` middleware for every route in the class |
+| Use middleware, URL params and `this` in handlers | [`public.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/sample/requests/public.ts) |
+
+Two contracts the samples rely on, both pinned by `sample-patterns-test.ts`:
+
+* `auth(request, state)` is synchronous. A returned Promise is not awaited; the request fails with **500** whatever the Promise resolves to. Do async checks in middleware.
+* The last function of a route is called without binding `this`. Use an arrow function (as the samples do) to reach the class instance; a method reference fails with 500. Middleware functions are bound.
+
+`private.ts` carries one deliberately invalid entry (`someInvalidMethod`) that the suite uses to check unknown methods are skipped, and its `auth` returns fixture statuses (505, 403) for the tests. Do not copy either; copy the `auth` in `base/api-request.ts`, which compares the token in constant time.
 
 ## Security notes
 
@@ -230,7 +248,7 @@ export default class MyRequest extends Request {
 ### Handler Features
 
 * Middleware support by passing an array of functions for a route
-* Automatic binding of `this` for instance methods
+* Middleware functions are called with `this` bound to the request class; the final handler is not bound, so write it as an arrow function
 * Returns integers as HTTP status codes
 * Returns objects as JSON responses
 * Undefined responses default to `200 OK`

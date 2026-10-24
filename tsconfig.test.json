@@ -6,7 +6,8 @@
     "noEmit": true,
     "declaration": false,
     "declarationMap": false,
-    "strict": false
+    "strict": false,
+    "rewriteRelativeImportExtensions": true
   },
   "include": ["src", "test", "config"]
 }

@@ -1,33 +1,36 @@
-import type { Request as ExpressRequest } from 'express';
-import { Request } from '@stonyx/rest-server';
-import type { RequestState, RouteHandlers } from '../../../src/request.js';
+import { Request, type AuthHandler, type RouteHandlers } from '@stonyx/rest-server';
 
 export default class PrivateRequest extends Request {
   handlers: RouteHandlers = {
     get: {
-      '/success': (_request: ExpressRequest, _state: RequestState) => {
+      '/success': () => {
         return { data: 'foo' };
       },
 
-      '/failure': (_request: ExpressRequest, _state: RequestState) => {
+      '/failure': () => {
         return { data: 'foo' };
       },
 
-      '/:id': (_request: ExpressRequest, _state: RequestState) => {
+      '/:id': () => {
         return { data: 'param-route' };
       }
     },
 
-    // @ts-expect-error intentionally invalid method for testing runtime validation
-    someInvalidMethod: (_request: ExpressRequest, _state: RequestState) => {
-      return { data: 'foo' };
+    // Deliberately invalid: the test suite asserts that an unknown method is
+    // skipped. Do not copy this entry.
+    someInvalidMethod: {
+      '/': () => {
+        return { data: 'foo' };
+      }
     }
-  }
+  };
 
-  // The auth hook handles authentication as a middleware for all handlers in this request class
-  auth = (request: ExpressRequest, _state: RequestState): number | undefined => {
+  // The auth hook handles authentication as a middleware for all handlers in this request class.
+  // The 505 and 403 below are test fixtures, not a real auth check: see
+  // base/api-request.ts for one to copy.
+  auth: AuthHandler = request => {
     if (request.path === '/failure') return 505;
     if (request.params?.id === 'restricted') return 403;
     return undefined;
-  }
+  };
 }

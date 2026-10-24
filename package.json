@@ -40,6 +40,7 @@
     "provenance": true
   },
   "dependencies": {
+    "@types/express": "^5.0.6",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "stonyx": "0.2.3-beta.103"
@@ -47,7 +48,6 @@
   "devDependencies": {
     "@stonyx/utils": "0.2.3-beta.28",
     "@types/cors": "^2.8.17",
-    "@types/express": "^5.0.6",
     "@types/node": "^25.5.2",
     "@types/qunit": "^2.19.13",
     "@types/sinon": "^21.0.1",

@@ -80,12 +80,21 @@ Unit tests for `Request` static methods:
 ### test/integration/rest-server-test.ts
 Integration tests that boot the full server and make HTTP requests:
 - 404 for non-existent routes
-- `/public` — JSON response, 200 OK default, URL params, middleware (success/failure), `this` binding for handlers and middleware
+- `/public` — JSON response, 200 OK default, URL params, middleware (success/failure); arrow-function handlers reach `this`, and middleware is bound
 - `/private` — authenticated success, auth hook rejection (505)
 - `/health` — health check endpoint returns 200
 
+### test/integration/sample-patterns-test.ts
+Exercises the consumer patterns in `test/sample/requests/` over HTTP (version gate, inherited `auth`, async middleware, headers/status), and pins the `auth()`-is-sync and unbound-final-handler behaviour.
+
+### test/unit/sample-imports-test.ts
+Fails if any file under `test/sample/` imports something other than `@stonyx/rest-server`, an exported subpath, a `node:` built-in, or another sample file that exists under the exact name imported (so a `.js` specifier for a `.ts` file, which tsx loads but `stonyx serve` does not, is rejected).
+
 ### test/sample/requests/
-Sample Request subclasses used by integration tests:
+Consumer-copyable Request subclasses, mounted by the integration tests. They import only `@stonyx/rest-server`, `node:` built-ins and each other:
+- `base/api-request.ts` — base class: async version-gate middleware in the constructor (426 + JSON:API error) and a sync `auth` with a constant-time token compare. Not mounted (discovery does not recurse)
+- `accounts.ts` — extends the base; async handler-array middleware
+- `widgets.ts` — response headers and a custom status
 - `public.ts` — `PublicRequest` with various GET handlers demonstrating middleware, params, binding
 - `private.ts` — `PrivateRequest` with `auth()` hook that rejects `/failure` with 505
 
@@ -129,16 +138,22 @@ stonyx-rest-server/
 │   │   └── environment.ts         # Test config override (dir → test/sample/requests)
 │   ├── integration/
 │   │   ├── readme-examples-test.ts  # README examples executed over a raw socket
-│   │   └── rest-server-test.ts    # Integration tests (QUnit)
+│   │   ├── rest-server-test.ts    # Integration tests (QUnit)
+│   │   └── sample-patterns-test.ts  # Consumer patterns in test/sample, over HTTP
 │   ├── sample/
 │   │   └── requests/
+│   │       ├── base/
+│   │       │   └── api-request.ts # Base class: version gate + inherited auth
+│   │       ├── accounts.ts        # Async handler-array middleware
 │   │       ├── private.ts         # Sample private request with auth hook
-│   │       └── public.ts          # Sample public request with middleware demos
+│   │       ├── public.ts          # Sample public request with middleware demos
+│   │       └── widgets.ts         # Response headers and custom status
 │   ├── unit/
 │   │   ├── docs-surface-test.ts   # Documentation contract tests
 │   │   ├── main-test.ts           # RestServer unit tests
 │   │   ├── publish-surface-test.ts  # Published-file surface tests
-│   │   └── request-test.ts        # Request unit tests (QUnit)
+│   │   ├── request-test.ts        # Request unit tests (QUnit)
+│   │   └── sample-imports-test.ts # test/sample imports are consumer-resolvable
 │   ├── setup.ts
 │   └── zz-exit-test.ts
 ├── .gitignore
@@ -153,6 +168,7 @@ stonyx-rest-server/
 ## Dependencies
 
 ### Runtime
+- `@types/express` ^5.0.6 — Express type declarations. A runtime dependency because the published `dist/main.d.ts` and `dist/request.d.ts` import `express` types, so a strict TypeScript consumer needs them to type-check
 - `cors` ^2.8.5 — CORS middleware
 - `express` ^5.1.0 — HTTP framework
 - `stonyx` (local link) — Framework core (config, logging)

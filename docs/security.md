@@ -13,7 +13,7 @@ Security-relevant behaviour of the module, for anyone changing `src/` or deployi
 
 - `auth(req, state)` runs inside each registered route handler, after express has matched the route, so `req.params`, `req.query` and `req.body` are populated when it runs (`src/request.ts`, `registerCalls()`).
 - Any falsy return lets the request through, and any truthy return is sent as the response status (`if (status) return sendStatusResponse(res, status)`). `0`, `null` and `false` therefore **allow** the request, just as `undefined` does. Return a non-zero integer status code to reject.
-- `auth` is called without `await`. Make it synchronous; a returned Promise is truthy and is not treated as "allowed".
+- `auth` is called without `await`. Make it synchronous; a returned Promise is truthy and is not treated as "allowed". The request fails with 500 whatever the Promise resolves to (pinned in `test/integration/sample-patterns-test.ts`).
 - The hook only runs for routes declared in that class's `handlers`. A path the class does not declare never reaches it.
 
 ## Request handling
