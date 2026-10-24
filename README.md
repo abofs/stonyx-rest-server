@@ -19,15 +19,28 @@ REST server module for the [Stonyx framework](https://github.com/abofs/stonyx), 
 
 | Import path | What it exports |
 | :--- | :--- |
-| `@stonyx/rest-server` | `RestServer` (default), `Request` (named) |
+| `@stonyx/rest-server` | `RestServer` (default), `Request` (named); types `RouteHandlers`, `RequestHandler`, `AuthHandler`, `RequestState` |
 
 There are no subpath exports.
 
 ## Samples
 
-The sample request classes in [`test/sample/`](https://github.com/abofs/stonyx-rest-server/tree/dev/test/sample) are the canonical usage reference for the runtime API of a JavaScript consumer: extending `Request`, declaring `handlers`, `auth` and middleware. The integration tests run against them. They are not included in the npm package.
+The request classes in [`test/sample/requests/`](https://github.com/abofs/stonyx-rest-server/tree/dev/test/sample/requests) are the canonical usage reference. They import only `@stonyx/rest-server`, so you can copy them into your app's `requests/` directory as TypeScript, or as JavaScript by deleting the type annotations. [`test/integration/sample-patterns-test.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/integration/sample-patterns-test.ts) exercises each one over HTTP, and [`test/unit/sample-imports-test.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/unit/sample-imports-test.ts) fails if a sample imports anything a consumer cannot resolve. They are not included in the npm package.
 
-They are not yet a TypeScript reference. Their type imports (`RequestState` and `RouteHandlers` from `../../../src/request.js`, and `express`) resolve only inside this repo, and some handlers are deliberately invalid or failing because the tests exercise those paths. Rewriting the samples for consumers is tracked in [stonyx#121](https://github.com/abofs/stonyx/issues/121) (part C).
+| How do I… | Sample |
+| :--- | :--- |
+| Run the same middleware (a version gate, say) in front of many routes, and return my own status and JSON body from it | [`base/api-request.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/sample/requests/base/api-request.ts): async middleware added to `this.expressInstance` in the constructor of a base class. Subclasses inherit it. There is no global request hook; this is the pattern |
+| Share one `auth` hook across request classes | [`base/api-request.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/sample/requests/base/api-request.ts), extended by [`accounts.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/sample/requests/accounts.ts). Keep base classes in a subdirectory: route discovery does not recurse, so they are never mounted |
+| Do async work (a lookup) before a handler, and stop the request if it fails | [`accounts.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/sample/requests/accounts.ts): handler-array middleware is awaited; return a status to stop, or set `state` and return `undefined` to continue |
+| Set response headers, or a status other than 200 with a JSON body | [`widgets.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/sample/requests/widgets.ts): `request.res` in a handler for one route, `this.expressInstance` middleware for every route in the class |
+| Use middleware, URL params and `this` in handlers | [`public.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/sample/requests/public.ts) |
+
+Two contracts the samples rely on, both pinned by `sample-patterns-test.ts`:
+
+* `auth(request, state)` is synchronous. A returned Promise is not awaited; the request fails with **500** whatever the Promise resolves to. Do async checks in middleware.
+* The last function of a route is called without binding `this`. Use an arrow function (as the samples do) to reach the class instance; a method reference fails with 500. Middleware functions are bound.
+
+`private.ts` carries one deliberately invalid entry (`someInvalidMethod`) that the suite uses to check unknown methods are skipped. Do not copy it.
 
 ## Security notes
 
@@ -230,7 +243,7 @@ export default class MyRequest extends Request {
 ### Handler Features
 
 * Middleware support by passing an array of functions for a route
-* Automatic binding of `this` for instance methods
+* Middleware functions are called with `this` bound to the request class; the final handler is not bound, so write it as an arrow function
 * Returns integers as HTTP status codes
 * Returns objects as JSON responses
 * Undefined responses default to `200 OK`

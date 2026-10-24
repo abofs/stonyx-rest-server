@@ -84,8 +84,17 @@ Integration tests that boot the full server and make HTTP requests:
 - `/private` — authenticated success, auth hook rejection (505)
 - `/health` — health check endpoint returns 200
 
+### test/integration/sample-patterns-test.ts
+Exercises the consumer patterns in `test/sample/requests/` over HTTP (version gate, inherited `auth`, async middleware, headers/status), and pins the `auth()`-is-sync and unbound-final-handler behaviour.
+
+### test/unit/sample-imports-test.ts
+Fails if any file under `test/sample/` imports something other than `@stonyx/rest-server`, an exported subpath, or another sample file.
+
 ### test/sample/requests/
-Sample Request subclasses used by integration tests:
+Consumer-copyable Request subclasses, mounted by the integration tests. They import only `@stonyx/rest-server`:
+- `base/api-request.ts` — base class: async version-gate middleware in the constructor (426 + JSON:API error) and a sync `auth`. Not mounted (discovery does not recurse)
+- `accounts.ts` — extends the base; async handler-array middleware
+- `widgets.ts` — response headers and a custom status
 - `public.ts` — `PublicRequest` with various GET handlers demonstrating middleware, params, binding
 - `private.ts` — `PrivateRequest` with `auth()` hook that rejects `/failure` with 505
 
@@ -129,16 +138,22 @@ stonyx-rest-server/
 │   │   └── environment.ts         # Test config override (dir → test/sample/requests)
 │   ├── integration/
 │   │   ├── readme-examples-test.ts  # README examples executed over a raw socket
-│   │   └── rest-server-test.ts    # Integration tests (QUnit)
+│   │   ├── rest-server-test.ts    # Integration tests (QUnit)
+│   │   └── sample-patterns-test.ts  # Consumer patterns in test/sample, over HTTP
 │   ├── sample/
 │   │   └── requests/
+│   │       ├── base/
+│   │       │   └── api-request.ts # Base class: version gate + inherited auth
+│   │       ├── accounts.ts        # Async handler-array middleware
 │   │       ├── private.ts         # Sample private request with auth hook
-│   │       └── public.ts          # Sample public request with middleware demos
+│   │       ├── public.ts          # Sample public request with middleware demos
+│   │       └── widgets.ts         # Response headers and custom status
 │   ├── unit/
 │   │   ├── docs-surface-test.ts   # Documentation contract tests
 │   │   ├── main-test.ts           # RestServer unit tests
 │   │   ├── publish-surface-test.ts  # Published-file surface tests
-│   │   └── request-test.ts        # Request unit tests (QUnit)
+│   │   ├── request-test.ts        # Request unit tests (QUnit)
+│   │   └── sample-imports-test.ts # test/sample imports are consumer-resolvable
 │   ├── setup.ts
 │   └── zz-exit-test.ts
 ├── .gitignore
