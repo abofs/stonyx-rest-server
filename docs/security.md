@@ -1,6 +1,6 @@
 # @stonyx/rest-server — Security Notes
 
-Security-relevant behaviour of the module, for anyone changing `src/` or deploying an app built on it. Each statement below cites the source line it was checked against.
+Security-relevant behaviour of the module, for anyone changing `src/` or deploying an app built on it. Each statement below names the source file (and function, where it helps) it was checked against.
 
 ## Case-sensitive routing
 
