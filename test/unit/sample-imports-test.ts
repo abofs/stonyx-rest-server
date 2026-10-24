@@ -1,13 +1,21 @@
-// The README promises that test/sample/ is copyable into a consumer app as-is,
-// in TypeScript or JavaScript. A consumer can resolve only this package's
-// public entry points, so a sample may import only @stonyx/rest-server (or a
-// package.json#exports subpath of it) and other files inside test/sample/.
-// Inside this repo `../../../src/...` and `express` both resolve, so the
-// suite cannot catch such an import by loading the samples; only this scan
-// does. Pattern from abofs/stonyx-discord test/unit/sample-imports-test.ts,
-// extended to backtick specifiers and require().
+// The README promises that test/sample/ is copyable into a consumer app as-is.
+// The samples demonstrate this package, so a sample may import only
+// @stonyx/rest-server (or a package.json#exports subpath of it), a `node:`
+// built-in, and other files inside test/sample/. Inside this repo
+// `../../../src/...` and `express` both resolve, so the suite cannot catch
+// such an import by loading the samples; only this scan does.
+//
+// A relative import must also name a file that exists, exactly as written.
+// `stonyx serve` loads a consumer's .ts files with Node's own type stripping,
+// which does not map a `.js` specifier to a `.ts` file; this suite runs under
+// tsx, which does, so it would hide a `./base/api-request.js` import that
+// fails in the consumer.
+//
+// Pattern from abofs/stonyx-discord test/unit/sample-imports-test.ts,
+// extended to backtick specifiers, require() and triple-slash references.
 import QUnit from 'qunit';
-import { readdirSync, readFileSync } from 'fs';
+import { readdirSync, readFileSync, statSync } from 'fs';
+import { isBuiltin } from 'module';
 import { join, relative, resolve, dirname } from 'path';
 
 const { module, test } = QUnit;
@@ -23,26 +31,33 @@ function sampleFiles(dir: string): string[] {
   });
 }
 
-// `from '...'`, `import '...'`, `import('...')` and `require('...')`, with
-// single, double or backtick quotes.
+// `from '...'`, `import '...'`, `import('...')`, `require('...')` and
+// `/// <reference types|path="..." />`, with single, double or backtick quotes.
 function specifiers(source: string): string[] {
   const found: string[] = [];
-  const pattern = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)(['"`])([^'"`]+)\1/g;
+  const pattern = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*|\/\/\/\s*<reference\s+(?:types|path)\s*=\s*)(['"`])([^'"`]+)\1/g;
   for (const match of source.matchAll(pattern)) found.push(match[2]);
   return found;
 }
 
-// A relative import is allowed only if it stays inside test/sample/. A bare
-// import must be the package itself or one of its package.json#exports keys.
+// A relative import is allowed only if it stays inside test/sample/ and names
+// an existing file as written. A bare import must be a `node:` built-in, the
+// package itself, or one of its package.json#exports keys.
 function allowed(file: string, spec: string): boolean {
-  if (spec.startsWith('.')) return !relative(SAMPLE_ROOT, resolve(dirname(file), spec)).startsWith('..');
+  if (spec.startsWith('node:')) return isBuiltin(spec);
+  if (spec.startsWith('.')) {
+    const target = resolve(dirname(file), spec);
+    // A file, not a directory: Node's ESM resolver does not resolve a
+    // directory specifier to its index file.
+    return !relative(SAMPLE_ROOT, target).startsWith('..') && statSync(target, { throwIfNoEntry: false })?.isFile() === true;
+  }
   if (spec === PACKAGE.name) return '.' in PACKAGE.exports;
   if (spec.startsWith(`${PACKAGE.name}/`)) return `./${spec.slice(PACKAGE.name.length + 1)}` in PACKAGE.exports;
   return false;
 }
 
 module('[Unit] Sample imports', function() {
-  test('every test/sample import is @stonyx/rest-server, an exported subpath, or a sibling sample', function(assert) {
+  test('every test/sample import is @stonyx/rest-server, an exported subpath, a node: built-in, or an existing sibling sample', function(assert) {
     const files = sampleFiles(SAMPLE_ROOT);
     const all = files.flatMap(file => specifiers(readFileSync(file, 'utf8')).map(spec => ({ file, spec })));
 
@@ -54,7 +69,7 @@ module('[Unit] Sample imports', function() {
       .filter(({ file, spec }) => !allowed(file, spec))
       .map(({ file, spec }) => `${relative(process.cwd(), file)}: ${spec}`);
 
-    assert.deepEqual(flagged, [], 'no sample imports src/, express, an unexported subpath, or a path outside test/sample/');
+    assert.deepEqual(flagged, [], 'no sample imports src/, express, an unexported subpath, a path outside test/sample/, or a relative file that does not exist as written');
   });
 
   // Red fixture: the scan and the rule each reject what they exist to reject.
@@ -65,12 +80,21 @@ module('[Unit] Sample imports', function() {
       'import type { Request } from "express";',
       'const lazy = await import(`@stonyx/rest-server/request`);',
       "const cjs = require('stonyx/config');",
-      "import './side-effect.js';"
+      '/// <reference types="express" />',
+      "import ApiRequest from './base/api-request.js';",
+      "import ApiRequestTs from './base/api-request.ts';",
+      "import { timingSafeEqual } from 'node:crypto';",
+      "import './base';",
+      "import 'node:not-a-builtin';"
     ].join('\n');
 
     const found = specifiers(source);
-    assert.deepEqual(found, ['../../../src/request.js', 'express', '@stonyx/rest-server/request', 'stonyx/config', './side-effect.js']);
-    assert.deepEqual(found.map(spec => allowed(file, spec)), [false, false, false, false, true]);
+    assert.deepEqual(found, [
+      '../../../src/request.js', 'express', '@stonyx/rest-server/request', 'stonyx/config',
+      'express', './base/api-request.js', './base/api-request.ts', 'node:crypto', './base', 'node:not-a-builtin'
+    ]);
+    // './base/api-request.js' resolves under tsx but not under `stonyx serve`.
+    assert.deepEqual(found.map(spec => allowed(file, spec)), [false, false, false, false, false, false, true, true, false, false]);
     assert.true(allowed(file, PACKAGE.name), 'the package root is allowed');
   });
 });

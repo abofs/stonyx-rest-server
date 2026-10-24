@@ -1,7 +1,7 @@
 // Mounted at /accounts. Inherits the version gate and `auth` from ApiRequest,
 // and shows async work in handler-array middleware.
 import type { RequestHandler, RouteHandlers } from '@stonyx/rest-server';
-import ApiRequest from './base/api-request.js';
+import ApiRequest from './base/api-request.ts';
 
 interface Account {
   id: string;
