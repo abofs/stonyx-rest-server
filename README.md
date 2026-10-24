@@ -25,7 +25,12 @@ There are no subpath exports.
 
 ## Samples
 
-The request classes in [`test/sample/requests/`](https://github.com/abofs/stonyx-rest-server/tree/dev/test/sample/requests) are the canonical usage reference. They import only `@stonyx/rest-server`, so you can copy them into your app's `requests/` directory as TypeScript, or as JavaScript by deleting the type annotations. [`test/integration/sample-patterns-test.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/integration/sample-patterns-test.ts) exercises each one over HTTP, and [`test/unit/sample-imports-test.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/unit/sample-imports-test.ts) fails if a sample imports anything a consumer cannot resolve. They are not included in the npm package.
+The request classes in [`test/sample/requests/`](https://github.com/abofs/stonyx-rest-server/tree/dev/test/sample/requests) are the canonical usage reference. They import only `@stonyx/rest-server`, `node:` built-ins and each other, so you can copy them into your app's `requests/` directory:
+
+* **As TypeScript:** copy them unchanged. `stonyx serve` runs them with Node's type stripping, which loads a relative import only by its real file name, so `accounts.ts` imports `./base/api-request.ts`, not `.js`. For `tsc` to accept that specifier, set `"rewriteRelativeImportExtensions": true` in your `tsconfig.json` (TypeScript 5.7+); the `stonyx new` tsconfig does not set it, and reports `TS5097` without it.
+* **As JavaScript:** delete the type annotations, rename each file to `.js`, and change the `.ts` in that relative import to `.js`.
+
+[`test/integration/sample-patterns-test.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/integration/sample-patterns-test.ts) exercises each one over HTTP. [`test/unit/sample-imports-test.ts`](https://github.com/abofs/stonyx-rest-server/blob/dev/test/unit/sample-imports-test.ts) fails if a sample imports anything other than `@stonyx/rest-server`, a `node:` built-in, or another sample file that exists under the exact name imported. The suite itself runs under tsx, which would load a `.js` specifier from a `.ts` file, so that check is what keeps the TypeScript copy loadable by `stonyx serve`. The samples are not included in the npm package.
 
 | How do I… | Sample |
 | :--- | :--- |
@@ -40,7 +45,7 @@ Two contracts the samples rely on, both pinned by `sample-patterns-test.ts`:
 * `auth(request, state)` is synchronous. A returned Promise is not awaited; the request fails with **500** whatever the Promise resolves to. Do async checks in middleware.
 * The last function of a route is called without binding `this`. Use an arrow function (as the samples do) to reach the class instance; a method reference fails with 500. Middleware functions are bound.
 
-`private.ts` carries one deliberately invalid entry (`someInvalidMethod`) that the suite uses to check unknown methods are skipped. Do not copy it.
+`private.ts` carries one deliberately invalid entry (`someInvalidMethod`) that the suite uses to check unknown methods are skipped, and its `auth` returns fixture statuses (505, 403) for the tests. Do not copy either; copy the `auth` in `base/api-request.ts`, which compares the token in constant time.
 
 ## Security notes
 

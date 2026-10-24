@@ -5,6 +5,9 @@
 // response object for that request. Anything set on it before the handler
 // returns (status, headers) is kept when the returned object is sent. A
 // returned integer is different: it replaces the response with that status.
+//
+// This route has no `auth`, to keep the sample about headers. Before you copy
+// a write route, add `auth` or extend your base class (see base/api-request.ts).
 import { Request, type RouteHandlers } from '@stonyx/rest-server';
 
 export default class WidgetsRequest extends Request {

@@ -17,7 +17,7 @@ export default class PrivateRequest extends Request {
     },
 
     // Deliberately invalid: the test suite asserts that an unknown method is
-    // skipped with a warning. Do not copy this entry.
+    // skipped. Do not copy this entry.
     someInvalidMethod: {
       '/': () => {
         return { data: 'foo' };
@@ -25,7 +25,9 @@ export default class PrivateRequest extends Request {
     }
   };
 
-  // The auth hook handles authentication as a middleware for all handlers in this request class
+  // The auth hook handles authentication as a middleware for all handlers in this request class.
+  // The 505 and 403 below are test fixtures, not a real auth check: see
+  // base/api-request.ts for one to copy.
   auth: AuthHandler = request => {
     if (request.path === '/failure') return 505;
     if (request.params?.id === 'restricted') return 403;
