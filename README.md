@@ -15,6 +15,12 @@ REST server module for the [Stonyx framework](https://github.com/abofs/stonyx), 
 * **Singleton server:** Only one RestServer instance runs, preventing accidental multiple listeners.
 * **Framework integration:** Works seamlessly as part of the Stonyx framework—auto-initialized with the rest of your modules.
 
+## Usage reference
+
+The sample request classes in [`test/sample/`](https://github.com/abofs/stonyx-rest-server/tree/dev/test/sample) are the canonical usage reference for this module; the integration tests run against them. They are not included in the npm package.
+
+The package has a single export, `@stonyx/rest-server` (the `RestServer` default export and the named `Request` export). There are no subpath exports.
+
 ## RestServer
 
 The `RestServer` class wraps an Express.js instance to provide:
