@@ -41,6 +41,15 @@ module('[Integration] Rest Server', function(hooks) {
       assert.equal(data, 'OK');
     });
 
+    // docs/security.md states this header survives the sub-app's disable(); if
+    // the parent app ever disables it, this goes red and the doc must change.
+    test('Responses carry X-Powered-By from the parent app (docs/security.md)', async function(assert) {
+      const response = await fetch(`${endpoint}/public/success`);
+      await response.arrayBuffer();
+
+      assert.equal(response.headers.get('x-powered-by'), 'Express');
+    });
+
     test('Correctly handles url params', async function(assert) {
       const response = await fetch(`${endpoint}/public/url-params/foo/bar/baz`);
       const data = await response.json();

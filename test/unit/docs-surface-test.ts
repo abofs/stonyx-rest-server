@@ -1,15 +1,12 @@
 // ---------------------------------------------------------------------------
-// #47 fix round -- documentation contract tests.
+// Documentation contract tests for the #47 case-sensitive routing change.
 //
-// SME Phase 5 (Doc-Update) returned 2 HIGH / 5 MEDIUM / 2 LOW, all of them
-// disclosure defects rather than code defects. Documentation findings get
-// regression tests here for the same reason code findings do: every one of
-// these was true at review head, is asserted false here, and a future edit that
-// reintroduces any of them turns this file red.
+// Each assertion pins a statement in README.md, docs/project-structure.md or
+// docs/security.md that was once wrong or missing. A later edit that
+// reintroduces any of those errors turns this file red.
 //
-// The behavioural half of the same review round lives in
-// test/integration/readme-examples-test.ts, where each documented example is
-// executed over a raw socket.
+// The behavioural half lives in test/integration/readme-examples-test.ts,
+// where each documented example is executed over a raw socket.
 // ---------------------------------------------------------------------------
 import QUnit from 'qunit';
 import { readFileSync } from 'fs';
@@ -20,11 +17,11 @@ const read = (relative: string) => readFileSync(new URL(`../../${relative}`, imp
 
 const readme = read('README.md');
 const projectStructure = read('docs/project-structure.md');
-const securityReviewer = read('docs/agents/security-reviewer.md');
+const security = read('docs/security.md');
 const packageJson = JSON.parse(read('package.json')) as { files: string[] };
 const environment = read('config/environment.js');
 
-module('[Unit] Documentation surface (#47 fix round)', function () {
+module('[Unit] Documentation surface (#47)', function () {
   // -------------------------------------------------------------------------
   // The premise the rest of this module rests on: README.md is the whole
   // published documentation surface. If docs/ ever became publishable this
@@ -206,21 +203,38 @@ module('[Unit] Documentation surface (#47 fix round)', function () {
   });
 
   // -------------------------------------------------------------------------
-  // Phase 5 MED-5 / Phase 2 WARNING-2 -- docs/agents/security-reviewer.md is
-  // the brief every future security review of this repo loads. This PR adds a
-  // security-relevant setting whose `false` value restores the #47 fail-open
-  // through a single environment variable, and the brief did not learn about
-  // it. #54 and #56 both recorded this exact file going stale as the thing that
-  // told the next reviewer to stop looking.
+  // MED-5 -- docs/security.md is where a reader looks for the module's
+  // security-relevant settings. caseSensitiveRoutes `false` restores the #47
+  // fail-open through a single environment variable, so the security notes
+  // have to name the setting, the variable and the issue.
   // -------------------------------------------------------------------------
-  test('MED-5 — the security-reviewer brief knows about caseSensitiveRoutes', function (assert) {
-    const liveKnowledge = securityReviewer.split(/^#+ .*Live Knowledge/m)[1]?.split(/^#+ /m)[0] ?? '';
+  test('MED-5 — docs/security.md documents caseSensitiveRoutes', function (assert) {
+    const section = security.split(/^#+ Case-sensitive routing/m)[1]?.split(/^#+ /m)[0] ?? '';
 
-    assert.ok(liveKnowledge.length > 0, 'the brief has a Live Knowledge section');
-    assert.ok(liveKnowledge.includes('caseSensitiveRoutes'), 'Live Knowledge names the setting');
+    assert.ok(section.length > 0, 'docs/security.md has a "Case-sensitive routing" section');
+    assert.ok(section.includes('caseSensitiveRoutes'), 'the section names the setting');
+    assert.ok(section.includes('REST_CASE_SENSITIVE_ROUTES'), 'the section names the env var that disables it');
+    assert.ok(/#47/.test(section), 'the section links the fail-open the setting closes');
+  });
+
+  // docs/security.md is not published (see the first test), so the README is
+  // the only route a consumer has to it. A relative link would 404 on npm.
+  test('the published README links docs/security.md by absolute URL', function (assert) {
     assert.ok(
-      liveKnowledge.includes('REST_CASE_SENSITIVE_ROUTES'), 'Live Knowledge names the env var that disables it'
+      readme.includes('https://github.com/abofs/stonyx-rest-server/blob/dev/docs/security.md'),
+      'README links the security notes with an absolute GitHub URL'
     );
-    assert.ok(/#47/.test(liveKnowledge), 'Live Knowledge links the fail-open the setting closes');
+  });
+
+  test('the README lists package entry points under "## Exports"', function (assert) {
+    const section = readme.split(/^## Exports$/m)[1]?.split(/^## /m)[0] ?? '';
+
+    const keys = Object.keys((JSON.parse(read('package.json')) as { exports: Record<string, unknown> }).exports);
+
+    assert.ok(keys.length > 0, 'package.json declares exports');
+    for (const key of keys) {
+      const specifier = `@stonyx/rest-server${key.slice(1)}`;
+      assert.ok(section.includes(`\`${specifier}\``), `the Exports section lists ${specifier}`);
+    }
   });
 });
