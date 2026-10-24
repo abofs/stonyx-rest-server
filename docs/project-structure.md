@@ -21,7 +21,7 @@ Singleton class wrapping an Express 5 instance.
 - **`init()`** — calls `setupRouter()`, then starts listening on the configured port
 - **`setupRouter()`** — calls `setupGlobalMiddleware()`, then uses `forEachFileImport` (from `@stonyx/utils/file`) to dynamically import all files in the configured `dir` and mount each as a route via `mountRoute()`. Registers `GET /health` after all route files unless `enableHealthCheck` is false.
 - **`setupGlobalMiddleware()`** — attaches `cors()` and `express.json()` middleware to the Express app
-- **`mountRoute(routeClass, { name, options })`** — instantiates the imported Request subclass, calls `registerCalls()`, and mounts the sub-app at `/<filename>` (a file named `index` mounts at `/`). Other modules call it through `RestServer.instance.mountRoute(...)` after init: `@stonyx/orm` (`src/setup-rest-server.ts`) and `@stonyx/oauth` (`src/main.ts`). Its signature, the `registerCalls()` contract and the `expressInstance` property are therefore public API
+- **`mountRoute(routeClass, { name, options })`** — instantiates the imported Request subclass, calls `registerCalls()`, and mounts the sub-app at `/<filename>` (a file named `index` mounts at `/`). Other modules call it through `RestServer.instance.mountRoute(...)` after init: `@stonyx/orm` (its `setup-rest-server.ts`) and `@stonyx/oauth` (its `main.ts`). Its signature, the `registerCalls()` contract and the `expressInstance` property are therefore public API
 - **`RestServer.close()`** — static method; calls `server.closeAllConnections()` then `server.close()`. A test that boots the server and does not call it leaves the port bound, and the next run fails with `EADDRINUSE`
 
 ### Request (src/request.ts)
