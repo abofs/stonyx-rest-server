@@ -22,6 +22,7 @@ import { forEachFileImport } from '@stonyx/utils/file';
 import type { Server } from 'http';
 
 export { default as Request } from './request.js';
+export type { AuthHandler, RequestHandler, RequestState, RouteHandlers } from './request.js';
 
 export default class RestServer {
   static instance: RestServer;
